@@ -38,7 +38,7 @@ func main() {
 
 	supabaseAuthService, err := services.NewSupabaseAuthService(
 		cfg.SupabaseURL,
-		cfg.SupabaseAnonKey,
+		cfg.SupabasePublicKey,
 	)
 	if err != nil {
 		log.Fatalf("failed to initialize Supabase authentication: %v", err)

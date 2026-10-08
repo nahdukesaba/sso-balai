@@ -80,3 +80,100 @@ func (r *UserRepository) GetByID(
 
 	return user, nil
 }
+
+func (r *UserRepository) GetByEmailIncludingDeleted(
+	ctx context.Context,
+	email string,
+) (*models.AppUser, error) {
+	row := r.pool.QueryRow(
+		ctx,
+		`
+		SELECT `+userColumns+`
+		FROM public.app_users
+		WHERE LOWER(email) = LOWER($1)
+		LIMIT 1
+		`,
+		email,
+	)
+
+	user, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf(
+			"get app user by email: %w",
+			err,
+		)
+	}
+
+	return user, nil
+}
+
+func (r *UserRepository) GetByIDIncludingDeleted(
+	ctx context.Context,
+	id string,
+) (*models.AppUser, error) {
+	row := r.pool.QueryRow(
+		ctx,
+		`
+		SELECT `+userColumns+`
+		FROM public.app_users
+		WHERE id = $1
+		LIMIT 1
+		`,
+		id,
+	)
+
+	user, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf(
+			"get app user by id including deleted: %w",
+			err,
+		)
+	}
+
+	return user, nil
+}
+
+func (r *UserRepository) CreateBootstrapUser(
+	ctx context.Context,
+	id string,
+	email string,
+	fullName string,
+	role string,
+) (*models.AppUser, error) {
+	row := r.pool.QueryRow(
+		ctx,
+		`
+		INSERT INTO public.app_users (
+			id,
+			email,
+			full_name,
+			role,
+			status
+		)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING `+userColumns,
+		id,
+		email,
+		fullName,
+		role,
+		models.UserStatusApproved,
+	)
+
+	user, err := scanUser(row)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"create bootstrap app user: %w",
+			err,
+		)
+	}
+
+	return user, nil
+}

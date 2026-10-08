@@ -11,22 +11,39 @@ type Config struct {
 	AppPort     string
 	DatabaseURL string
 
-	SupabaseURL        string
-	SupabaseAnonKey    string
-	SupabaseServiceKey string
+	SupabaseURL       string
+	SupabasePublicKey string
+	SupabaseAdminKey  string
+
+	BootstrapEmail    string
+	BootstrapPassword string
+	BootstrapName     string
+	BootstrapRole     string
 }
 
 func Load() (*Config, error) {
-	// .env hanya digunakan untuk development lokal.
-	// Jika file tidak ada, environment variable dari OS/server tetap digunakan.
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		AppPort:            getEnv("APP_PORT", "8080"),
-		DatabaseURL:        os.Getenv("DATABASE_URL"),
-		SupabaseURL:        os.Getenv("SUPABASE_URL"),
-		SupabaseAnonKey:    os.Getenv("SUPABASE_ANON_KEY"),
-		SupabaseServiceKey: os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
+		AppPort:     getEnv("APP_PORT", "8080"),
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+
+		SupabaseURL: os.Getenv("SUPABASE_URL"),
+
+		SupabasePublicKey: firstNonEmpty(
+			os.Getenv("SUPABASE_PUBLISHABLE_KEY"),
+			os.Getenv("SUPABASE_ANON_KEY"),
+		),
+
+		SupabaseAdminKey: firstNonEmpty(
+			os.Getenv("SUPABASE_SECRET_KEY"),
+			os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
+		),
+
+		BootstrapEmail:    os.Getenv("BOOTSTRAP_USER_EMAIL"),
+		BootstrapPassword: os.Getenv("BOOTSTRAP_USER_PASSWORD"),
+		BootstrapName:     os.Getenv("BOOTSTRAP_USER_NAME"),
+		BootstrapRole:     getEnv("BOOTSTRAP_USER_ROLE", "admin"),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -43,4 +60,14 @@ func getEnv(key, fallback string) string {
 	}
 
 	return value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+
+	return ""
 }
