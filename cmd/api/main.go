@@ -8,6 +8,7 @@ import (
 	"github.com/nahdukesaba/sso-balai/internal/config"
 	"github.com/nahdukesaba/sso-balai/internal/database"
 	"github.com/nahdukesaba/sso-balai/internal/handlers"
+	"github.com/nahdukesaba/sso-balai/internal/middleware"
 	"github.com/nahdukesaba/sso-balai/internal/repository"
 	"github.com/nahdukesaba/sso-balai/internal/router"
 	"github.com/nahdukesaba/sso-balai/internal/services"
@@ -49,7 +50,7 @@ func main() {
 	)
 
 	authHandler := handlers.NewAuthHandler(authService)
-
+	authMiddleware := middleware.NewAuthMiddleware(authService)
 	app := fiber.New()
 
 	app.Get("/health", func(c *fiber.Ctx) error {
@@ -63,6 +64,7 @@ func main() {
 	router.Register(
 		app,
 		authHandler,
+		authMiddleware,
 	)
 
 	log.Printf("SSO Balai listening on port %s", cfg.AppPort)

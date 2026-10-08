@@ -15,6 +15,7 @@ import (
 
 var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
+	ErrInvalidToken       = errors.New("invalid access token")
 	ErrAuthRateLimited    = errors.New("too many authentication attempts")
 	ErrAuthUnavailable    = errors.New("authentication service unavailable")
 )
@@ -41,6 +42,11 @@ type supabaseTokenResponse struct {
 		ID    string `json:"id"`
 		Email string `json:"email"`
 	} `json:"user"`
+}
+
+type supabaseUserResponse struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
 }
 
 func NewSupabaseAuthService(
@@ -147,5 +153,67 @@ func (s *SupabaseAuthService) SignInWithPassword(
 			ID:    tokenResponse.User.ID,
 			Email: tokenResponse.User.Email,
 		},
+	}, nil
+}
+
+func (s *SupabaseAuthService) VerifyAccessToken(
+	ctx context.Context,
+	accessToken string,
+) (*models.SupabaseAuthUser, error) {
+	accessToken = strings.TrimSpace(accessToken)
+
+	if accessToken == "" {
+		return nil, ErrInvalidToken
+	}
+
+	endpoint := s.baseURL + "/auth/v1/user"
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		endpoint,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create token verification request: %w", err)
+	}
+
+	req.Header.Set("apikey", s.apiKey)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrAuthUnavailable, err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// Continue.
+
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return nil, ErrInvalidToken
+
+	default:
+		return nil, fmt.Errorf(
+			"%w: upstream returned status %d",
+			ErrAuthUnavailable,
+			resp.StatusCode,
+		)
+	}
+
+	var userResponse supabaseUserResponse
+
+	if err := json.NewDecoder(resp.Body).Decode(&userResponse); err != nil {
+		return nil, fmt.Errorf("decode verified user: %w", err)
+	}
+
+	if userResponse.ID == "" {
+		return nil, ErrInvalidToken
+	}
+
+	return &models.SupabaseAuthUser{
+		ID:    userResponse.ID,
+		Email: userResponse.Email,
 	}, nil
 }

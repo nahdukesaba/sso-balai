@@ -6,6 +6,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	"github.com/nahdukesaba/sso-balai/internal/middleware"
+	"github.com/nahdukesaba/sso-balai/internal/models"
 	"github.com/nahdukesaba/sso-balai/internal/services"
 )
 
@@ -25,22 +27,26 @@ type loginRequest struct {
 }
 
 type loginResponse struct {
-	AccessToken string            `json:"accessToken"`
-	TokenType   string            `json:"tokenType"`
-	ExpiresIn   int               `json:"expiresIn"`
-	ExpiresAt   int64             `json:"expiresAt"`
-	User        loginUserResponse `json:"user"`
+	AccessToken string       `json:"accessToken"`
+	TokenType   string       `json:"tokenType"`
+	ExpiresIn   int          `json:"expiresIn"`
+	ExpiresAt   int64        `json:"expiresAt"`
+	User        userResponse `json:"user"`
 }
 
-type loginUserResponse struct {
-	ID       string                `json:"id"`
-	Email    string                `json:"email"`
-	FullName string                `json:"fullName"`
-	Phone    *string               `json:"phone,omitempty"`
-	Pegawai  *loginPegawaiResponse `json:"pegawai,omitempty"`
+type meResponse struct {
+	User userResponse `json:"user"`
 }
 
-type loginPegawaiResponse struct {
+type userResponse struct {
+	ID       string           `json:"id"`
+	Email    string           `json:"email"`
+	FullName string           `json:"fullName"`
+	Phone    *string          `json:"phone,omitempty"`
+	Pegawai  *pegawaiResponse `json:"pegawai,omitempty"`
+}
+
+type pegawaiResponse struct {
 	NIP           *string `json:"nip,omitempty"`
 	Alamat        *string `json:"alamat,omitempty"`
 	GelarDepan    *string `json:"gelarDepan,omitempty"`
@@ -75,29 +81,47 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		return handleLoginError(c, err)
 	}
 
-	response := loginResponse{
+	return c.Status(fiber.StatusOK).JSON(loginResponse{
 		AccessToken: result.Session.AccessToken,
 		TokenType:   result.Session.TokenType,
 		ExpiresIn:   result.Session.ExpiresIn,
 		ExpiresAt:   result.Session.ExpiresAt,
-		User: loginUserResponse{
-			ID:       result.Identity.User.ID,
-			Email:    result.Identity.User.Email,
-			FullName: result.Identity.User.FullName,
-			Phone:    result.Identity.User.Phone,
-		},
+		User:        buildUserResponse(result.Identity),
+	})
+}
+
+func (h *AuthHandler) Me(c *fiber.Ctx) error {
+	identity, ok := middleware.GetAuthenticatedIdentity(c)
+	if !ok || identity == nil || identity.User == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":   "internal_error",
+			"message": "Identitas pengguna tidak tersedia.",
+		})
 	}
 
-	if result.Identity.Pegawai != nil {
-		response.User.Pegawai = &loginPegawaiResponse{
-			NIP:           result.Identity.Pegawai.NIP,
-			Alamat:        result.Identity.Pegawai.Alamat,
-			GelarDepan:    result.Identity.Pegawai.GelarDepan,
-			GelarBelakang: result.Identity.Pegawai.GelarBelakang,
+	return c.Status(fiber.StatusOK).JSON(meResponse{
+		User: buildUserResponse(identity),
+	})
+}
+
+func buildUserResponse(identity *models.Identity) userResponse {
+	response := userResponse{
+		ID:       identity.User.ID,
+		Email:    identity.User.Email,
+		FullName: identity.User.FullName,
+		Phone:    identity.User.Phone,
+	}
+
+	if identity.Pegawai != nil {
+		response.Pegawai = &pegawaiResponse{
+			NIP:           identity.Pegawai.NIP,
+			Alamat:        identity.Pegawai.Alamat,
+			GelarDepan:    identity.Pegawai.GelarDepan,
+			GelarBelakang: identity.Pegawai.GelarBelakang,
 		}
 	}
 
-	return c.Status(fiber.StatusOK).JSON(response)
+	return response
 }
 
 func handleLoginError(c *fiber.Ctx, err error) error {

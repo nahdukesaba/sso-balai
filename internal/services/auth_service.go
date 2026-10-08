@@ -43,10 +43,37 @@ func (s *AuthService) Login(
 		return nil, err
 	}
 
-	identity, err := s.identityService.GetByUserID(
+	identity, err := s.loadApprovedIdentity(ctx, session.User.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &models.LoginResult{
+		Session:  session,
+		Identity: identity,
+	}, nil
+}
+
+func (s *AuthService) AuthenticateAccessToken(
+	ctx context.Context,
+	accessToken string,
+) (*models.Identity, error) {
+	authUser, err := s.supabaseAuthService.VerifyAccessToken(
 		ctx,
-		session.User.ID,
+		accessToken,
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.loadApprovedIdentity(ctx, authUser.ID)
+}
+
+func (s *AuthService) loadApprovedIdentity(
+	ctx context.Context,
+	userID string,
+) (*models.Identity, error) {
+	identity, err := s.identityService.GetByUserID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
 			return nil, ErrAccountUnavailable
@@ -57,7 +84,7 @@ func (s *AuthService) Login(
 
 	switch identity.User.Status {
 	case models.UserStatusApproved:
-		// User is allowed to continue.
+		return identity, nil
 
 	case models.UserStatusPending:
 		return nil, ErrAccountPending
@@ -68,9 +95,4 @@ func (s *AuthService) Login(
 	default:
 		return nil, ErrAccountUnavailable
 	}
-
-	return &models.LoginResult{
-		Session:  session,
-		Identity: identity,
-	}, nil
 }
