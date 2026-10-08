@@ -7,6 +7,10 @@ import (
 
 	"github.com/nahdukesaba/sso-balai/internal/config"
 	"github.com/nahdukesaba/sso-balai/internal/database"
+	"github.com/nahdukesaba/sso-balai/internal/handlers"
+	"github.com/nahdukesaba/sso-balai/internal/repository"
+	"github.com/nahdukesaba/sso-balai/internal/router"
+	"github.com/nahdukesaba/sso-balai/internal/services"
 )
 
 func main() {
@@ -23,6 +27,29 @@ func main() {
 
 	log.Println("database connection established")
 
+	userRepository := repository.NewUserRepository(db)
+	pegawaiRepository := repository.NewPegawaiRepository(db)
+
+	identityService := services.NewIdentityService(
+		userRepository,
+		pegawaiRepository,
+	)
+
+	supabaseAuthService, err := services.NewSupabaseAuthService(
+		cfg.SupabaseURL,
+		cfg.SupabaseAnonKey,
+	)
+	if err != nil {
+		log.Fatalf("failed to initialize Supabase authentication: %v", err)
+	}
+
+	authService := services.NewAuthService(
+		supabaseAuthService,
+		identityService,
+	)
+
+	authHandler := handlers.NewAuthHandler(authService)
+
 	app := fiber.New()
 
 	app.Get("/health", func(c *fiber.Ctx) error {
@@ -32,6 +59,11 @@ func main() {
 			"database": "connected",
 		})
 	})
+
+	router.Register(
+		app,
+		authHandler,
+	)
 
 	log.Printf("SSO Balai listening on port %s", cfg.AppPort)
 
