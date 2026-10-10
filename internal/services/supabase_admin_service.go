@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -183,6 +184,54 @@ func (s *SupabaseAdminService) CreateUser(
 		ID:    authUser.ID,
 		Email: authUser.Email,
 	}, nil
+}
+
+func (s *SupabaseAdminService) DeleteUser(
+	ctx context.Context,
+	userID string,
+) error {
+	userID = strings.TrimSpace(userID)
+
+	if userID == "" {
+		return errors.New("user ID is required")
+	}
+
+	endpoint := s.baseURL +
+		"/auth/v1/admin/users/" +
+		url.PathEscape(userID)
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodDelete,
+		endpoint,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("create admin delete user request: %w", err)
+	}
+
+	s.setAdminHeaders(req)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrAdminUnavailable, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+
+	if resp.StatusCode < http.StatusOK ||
+		resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf(
+			"%w: delete user returned status %d",
+			ErrAdminUnavailable,
+			resp.StatusCode,
+		)
+	}
+
+	return nil
 }
 
 func (s *SupabaseAdminService) setAdminHeaders(req *http.Request) {

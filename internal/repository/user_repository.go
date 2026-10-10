@@ -213,3 +213,25 @@ func (r *UserRepository) CreateMigratedUser(
 
 	return user, nil
 }
+
+func (r *UserRepository) DeleteByIDForMigration(
+	ctx context.Context,
+	id string,
+) error {
+	_, err := r.pool.Exec(
+		ctx,
+		`
+		DELETE FROM public.app_users
+		WHERE id = $1
+		`,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"delete migrated app user: %w",
+			err,
+		)
+	}
+
+	return nil
+}

@@ -109,6 +109,19 @@ func (s *KlinikMigrationService) Migrate(
 		klinikUser.Name,
 	)
 	if err != nil {
+		cleanupErr := s.cleanupCreatedIdentity(
+			ctx,
+			authUser.ID,
+		)
+
+		if cleanupErr != nil {
+			return nil, fmt.Errorf(
+				"create migrated app user: %w; cleanup failed: %v",
+				err,
+				cleanupErr,
+			)
+		}
+
 		return nil, fmt.Errorf(
 			"create migrated app user: %w",
 			err,
@@ -121,6 +134,19 @@ func (s *KlinikMigrationService) Migrate(
 		klinikUser.NIP,
 	)
 	if err != nil {
+		cleanupErr := s.cleanupCreatedIdentity(
+			ctx,
+			authUser.ID,
+		)
+
+		if cleanupErr != nil {
+			return nil, fmt.Errorf(
+				"create migrated employee: %w; cleanup failed: %v",
+				err,
+				cleanupErr,
+			)
+		}
+
 		return nil, fmt.Errorf(
 			"create migrated employee: %w",
 			err,
@@ -128,4 +154,34 @@ func (s *KlinikMigrationService) Migrate(
 	}
 
 	return authUser, nil
+}
+
+func (s *KlinikMigrationService) cleanupCreatedIdentity(
+	ctx context.Context,
+	authUserID string,
+) error {
+	var cleanupErrors []error
+
+	if err := s.pegawaiRepository.DeleteByAppUserIDForMigration(
+		ctx,
+		authUserID,
+	); err != nil {
+		cleanupErrors = append(cleanupErrors, err)
+	}
+
+	if err := s.userRepository.DeleteByIDForMigration(
+		ctx,
+		authUserID,
+	); err != nil {
+		cleanupErrors = append(cleanupErrors, err)
+	}
+
+	if err := s.adminService.DeleteUser(
+		ctx,
+		authUserID,
+	); err != nil {
+		cleanupErrors = append(cleanupErrors, err)
+	}
+
+	return errors.Join(cleanupErrors...)
 }

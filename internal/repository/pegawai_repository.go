@@ -123,3 +123,25 @@ func (r *PegawaiRepository) CreateForMigratedUser(
 
 	return &pegawai, nil
 }
+
+func (r *PegawaiRepository) DeleteByAppUserIDForMigration(
+	ctx context.Context,
+	appUserID string,
+) error {
+	_, err := r.pool.Exec(
+		ctx,
+		`
+		DELETE FROM public.app_pegawai
+		WHERE app_user_id = $1
+		`,
+		appUserID,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"delete migrated employee: %w",
+			err,
+		)
+	}
+
+	return nil
+}
