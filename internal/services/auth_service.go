@@ -3,29 +3,32 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
+	"strings"
 
 	"github.com/nahdukesaba/sso-balai/internal/models"
 )
 
 var (
 	ErrAccountPending     = errors.New("account is pending approval")
-	ErrAccountRejected    = errors.New("account has been rejected")
+	ErrAccountRejected    = errors.New("account is rejected")
 	ErrAccountUnavailable = errors.New("account is unavailable")
 )
 
 type AuthService struct {
-	supabaseAuthService *SupabaseAuthService
-	identityService     *IdentityService
+	supabaseAuthService    *SupabaseAuthService
+	identityService        *IdentityService
+	klinikMigrationService *KlinikMigrationService
 }
 
 func NewAuthService(
 	supabaseAuthService *SupabaseAuthService,
 	identityService *IdentityService,
+	klinikMigrationService *KlinikMigrationService,
 ) *AuthService {
 	return &AuthService{
-		supabaseAuthService: supabaseAuthService,
-		identityService:     identityService,
+		supabaseAuthService:    supabaseAuthService,
+		identityService:        identityService,
+		klinikMigrationService: klinikMigrationService,
 	}
 }
 
@@ -33,17 +36,57 @@ func (s *AuthService) Login(
 	ctx context.Context,
 	email string,
 	password string,
+	nip string,
 ) (*models.LoginResult, error) {
+	email = strings.TrimSpace(email)
+	nip = strings.TrimSpace(nip)
+
 	session, err := s.supabaseAuthService.SignInWithPassword(
 		ctx,
 		email,
 		password,
 	)
+
 	if err != nil {
-		return nil, err
+		// Fallback Klinik hanya boleh dijalankan apabila Supabase
+		// benar-benar menolak credential, bukan ketika Supabase
+		// sedang unavailable atau rate-limited.
+		if !errors.Is(err, ErrInvalidCredentials) {
+			return nil, err
+		}
+
+		// NIP bersifat opsional untuk user SSO/SILAPET existing,
+		// tetapi wajib untuk first-login migration user Klinik.
+		if nip == "" || s.klinikMigrationService == nil {
+			return nil, ErrInvalidCredentials
+		}
+
+		_, migrationErr := s.klinikMigrationService.Migrate(
+			ctx,
+			email,
+			nip,
+			password,
+		)
+		if migrationErr != nil {
+			return nil, migrationErr
+		}
+
+		// Migration berhasil. Login ulang melalui Supabase supaya
+		// token yang dikembalikan tetap token resmi SSO/Supabase.
+		session, err = s.supabaseAuthService.SignInWithPassword(
+			ctx,
+			email,
+			password,
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	identity, err := s.loadApprovedIdentity(ctx, session.User.ID)
+	identity, err := s.loadApprovedIdentity(
+		ctx,
+		session.User.ID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +122,11 @@ func (s *AuthService) loadApprovedIdentity(
 			return nil, ErrAccountUnavailable
 		}
 
-		return nil, fmt.Errorf("load authenticated user identity: %w", err)
+		return nil, err
+	}
+
+	if identity == nil || identity.User == nil {
+		return nil, ErrAccountUnavailable
 	}
 
 	switch identity.User.Status {

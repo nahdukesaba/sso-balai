@@ -24,6 +24,7 @@ func NewAuthHandler(authService *services.AuthService) *AuthHandler {
 type loginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	NIP      string `json:"nip,omitempty"`
 }
 
 type loginResponse struct {
@@ -64,6 +65,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	}
 
 	request.Email = strings.TrimSpace(request.Email)
+	request.NIP = strings.TrimSpace(request.NIP)
 
 	if request.Email == "" || request.Password == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -76,6 +78,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		c.UserContext(),
 		request.Email,
 		request.Password,
+		request.NIP,
 	)
 	if err != nil {
 		return handleLoginError(c, err)
@@ -154,6 +157,12 @@ func handleLoginError(c *fiber.Ctx, err error) error {
 		return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
 			"error":   "rate_limited",
 			"message": "Terlalu banyak percobaan login. Coba kembali nanti.",
+		})
+
+	case errors.Is(err, services.ErrKlinikMigrationConflict):
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error":   "identity_conflict",
+			"message": "Identitas akun tidak dapat dimigrasikan secara otomatis.",
 		})
 
 	case errors.Is(err, services.ErrAuthUnavailable):

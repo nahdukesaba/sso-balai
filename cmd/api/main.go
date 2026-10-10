@@ -30,6 +30,7 @@ func main() {
 
 	userRepository := repository.NewUserRepository(db)
 	pegawaiRepository := repository.NewPegawaiRepository(db)
+	klinikUserRepository := repository.NewKlinikUserRepository(db)
 
 	identityService := services.NewIdentityService(
 		userRepository,
@@ -44,9 +45,32 @@ func main() {
 		log.Fatalf("failed to initialize Supabase authentication: %v", err)
 	}
 
+	supabaseAdminService, err := services.NewSupabaseAdminService(
+		cfg.SupabaseURL,
+		cfg.SupabaseAdminKey,
+	)
+	if err != nil {
+		log.Fatalf(
+			"failed to initialize Supabase admin service: %v",
+			err,
+		)
+	}
+
+	klinikCredentialService := services.NewKlinikCredentialService(
+		klinikUserRepository,
+	)
+
+	klinikMigrationService := services.NewKlinikMigrationService(
+		klinikCredentialService,
+		supabaseAdminService,
+		userRepository,
+		pegawaiRepository,
+	)
+
 	authService := services.NewAuthService(
 		supabaseAuthService,
 		identityService,
+		klinikMigrationService,
 	)
 
 	authHandler := handlers.NewAuthHandler(authService)
