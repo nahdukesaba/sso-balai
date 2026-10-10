@@ -177,3 +177,39 @@ func (r *UserRepository) CreateBootstrapUser(
 
 	return user, nil
 }
+
+func (r *UserRepository) CreateMigratedUser(
+	ctx context.Context,
+	id string,
+	email string,
+	fullName string,
+) (*models.AppUser, error) {
+	row := r.pool.QueryRow(
+		ctx,
+		`
+		INSERT INTO public.app_users (
+			id,
+			email,
+			full_name,
+			role,
+			status
+		)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING `+userColumns,
+		id,
+		email,
+		fullName,
+		"user",
+		models.UserStatusApproved,
+	)
+
+	user, err := scanUser(row)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"create migrated app user: %w",
+			err,
+		)
+	}
+
+	return user, nil
+}

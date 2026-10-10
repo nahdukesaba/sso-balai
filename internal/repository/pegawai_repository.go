@@ -70,3 +70,56 @@ func (r *PegawaiRepository) GetByAppUserID(
 
 	return &pegawai, nil
 }
+
+func (r *PegawaiRepository) CreateForMigratedUser(
+	ctx context.Context,
+	appUserID string,
+	nip string,
+) (*models.Pegawai, error) {
+	row := r.pool.QueryRow(
+		ctx,
+		`
+		INSERT INTO public.app_pegawai (
+			app_user_id,
+			nip
+		)
+		VALUES ($1, NULLIF($2, ''))
+		RETURNING
+			id,
+			app_user_id,
+			nip,
+			nik,
+			alamat,
+			gelar_depan,
+			gelar_belakang,
+			created_at,
+			updated_at,
+			deleted_at
+		`,
+		appUserID,
+		nip,
+	)
+
+	var pegawai models.Pegawai
+
+	err := row.Scan(
+		&pegawai.ID,
+		&pegawai.AppUserID,
+		&pegawai.NIP,
+		&pegawai.NIK,
+		&pegawai.Alamat,
+		&pegawai.GelarDepan,
+		&pegawai.GelarBelakang,
+		&pegawai.CreatedAt,
+		&pegawai.UpdatedAt,
+		&pegawai.DeletedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"create migrated employee: %w",
+			err,
+		)
+	}
+
+	return &pegawai, nil
+}
