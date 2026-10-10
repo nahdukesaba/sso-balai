@@ -37,6 +37,10 @@ func main() {
 		pegawaiRepository,
 	)
 
+	klinikContextService := services.NewKlinikContextService(
+		klinikUserRepository,
+	)
+
 	supabaseAuthService, err := services.NewSupabaseAuthService(
 		cfg.SupabaseURL,
 		cfg.SupabasePublicKey,
@@ -73,7 +77,7 @@ func main() {
 		klinikMigrationService,
 	)
 
-	authHandler := handlers.NewAuthHandler(authService)
+	authHandler := handlers.NewAuthHandler(authService, klinikContextService)
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 	app := fiber.New()
 

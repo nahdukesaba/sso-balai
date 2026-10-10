@@ -12,12 +12,17 @@ import (
 )
 
 type AuthHandler struct {
-	authService *services.AuthService
+	authService          *services.AuthService
+	klinikContextService *services.KlinikContextService
 }
 
-func NewAuthHandler(authService *services.AuthService) *AuthHandler {
+func NewAuthHandler(
+	authService *services.AuthService,
+	klinikContextService *services.KlinikContextService,
+) *AuthHandler {
 	return &AuthHandler{
-		authService: authService,
+		authService:          authService,
+		klinikContextService: klinikContextService,
 	}
 }
 
@@ -37,6 +42,12 @@ type loginResponse struct {
 
 type meResponse struct {
 	User userResponse `json:"user"`
+}
+
+type klinikContextResponse struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+	Role  string `json:"role"`
 }
 
 type userResponse struct {
@@ -125,6 +136,54 @@ func buildUserResponse(identity *models.Identity) userResponse {
 	}
 
 	return response
+}
+
+func (h *AuthHandler) KlinikContext(c *fiber.Ctx) error {
+	identity, ok := middleware.GetAuthenticatedIdentity(c)
+	if !ok ||
+		identity == nil ||
+		identity.User == nil {
+
+		return c.Status(
+			fiber.StatusInternalServerError,
+		).JSON(fiber.Map{
+			"error":   "internal_error",
+			"message": "Identitas pengguna tidak tersedia.",
+		})
+	}
+
+	klinikUser, err := h.klinikContextService.GetByEmail(
+		c.UserContext(),
+		identity.User.Email,
+	)
+	if err != nil {
+		if errors.Is(
+			err,
+			services.ErrKlinikAccountUnavailable,
+		) {
+			return c.Status(
+				fiber.StatusForbidden,
+			).JSON(fiber.Map{
+				"error":   "klinik_account_unavailable",
+				"message": "Pengguna tidak memiliki akses aktif ke Klinik PKP.",
+			})
+		}
+
+		return c.Status(
+			fiber.StatusInternalServerError,
+		).JSON(fiber.Map{
+			"error":   "internal_error",
+			"message": "Terjadi kesalahan pada server.",
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(
+		klinikContextResponse{
+			ID:    klinikUser.ID,
+			Email: klinikUser.Email,
+			Role:  klinikUser.Role,
+		},
+	)
 }
 
 func handleLoginError(c *fiber.Ctx, err error) error {

@@ -18,4 +18,5 @@ func Register(
 
 	auth.Post("/login", authHandler.Login)
 	auth.Get("/me", authMiddleware.RequireAuth, authHandler.Me)
+	auth.Get("/klinik-context", authMiddleware.RequireAuth, authHandler.KlinikContext)
 }
