@@ -8,6 +8,7 @@ import (
 )
 
 type Config struct {
+	AppHost     string
 	AppPort     string
 	DatabaseURL string
 
@@ -25,6 +26,7 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
+		AppHost:     getEnv("APP_HOST", "127.0.0.1"),
 		AppPort:     getEnv("APP_PORT", "8080"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 

@@ -95,7 +95,9 @@ func main() {
 		authMiddleware,
 	)
 
-	log.Printf("SSO Balai listening on port %s", cfg.AppPort)
+	listenAddress := cfg.AppHost + ":" + cfg.AppPort
 
-	log.Fatal(app.Listen(":" + cfg.AppPort))
+	log.Printf("SSO Balai listening on %s", listenAddress)
+
+	log.Fatal(app.Listen(listenAddress))
 }
