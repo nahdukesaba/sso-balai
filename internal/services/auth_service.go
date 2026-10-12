@@ -36,10 +36,8 @@ func (s *AuthService) Login(
 	ctx context.Context,
 	email string,
 	password string,
-	nip string,
 ) (*models.LoginResult, error) {
 	email = strings.TrimSpace(email)
-	nip = strings.TrimSpace(nip)
 
 	session, err := s.supabaseAuthService.SignInWithPassword(
 		ctx,
@@ -55,16 +53,15 @@ func (s *AuthService) Login(
 			return nil, err
 		}
 
-		// NIP bersifat opsional untuk user SSO/SILAPET existing,
-		// tetapi wajib untuk first-login migration user Klinik.
-		if nip == "" || s.klinikMigrationService == nil {
+		// First-login migration Klinik cukup menggunakan email dan password.
+		// NIP bukan credential login dan akan diambil dari database Klinik.
+		if s.klinikMigrationService == nil {
 			return nil, ErrInvalidCredentials
 		}
 
 		_, migrationErr := s.klinikMigrationService.Migrate(
 			ctx,
 			email,
-			nip,
 			password,
 		)
 		if migrationErr != nil {

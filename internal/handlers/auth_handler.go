@@ -29,7 +29,6 @@ func NewAuthHandler(
 type loginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
-	NIP      string `json:"nip,omitempty"`
 }
 
 type loginResponse struct {
@@ -76,7 +75,6 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	}
 
 	request.Email = strings.TrimSpace(request.Email)
-	request.NIP = strings.TrimSpace(request.NIP)
 
 	if request.Email == "" || request.Password == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -89,8 +87,8 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		c.UserContext(),
 		request.Email,
 		request.Password,
-		request.NIP,
 	)
+
 	if err != nil {
 		return handleLoginError(c, err)
 	}

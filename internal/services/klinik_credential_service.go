@@ -26,13 +26,11 @@ func NewKlinikCredentialService(
 func (s *KlinikCredentialService) Verify(
 	ctx context.Context,
 	email string,
-	nip string,
 	password string,
 ) (*models.KlinikUser, error) {
 	email = strings.TrimSpace(email)
-	nip = strings.TrimSpace(nip)
 
-	if email == "" || nip == "" || password == "" {
+	if email == "" || password == "" {
 		return nil, ErrInvalidCredentials
 	}
 
@@ -42,10 +40,6 @@ func (s *KlinikCredentialService) Verify(
 	}
 
 	if user == nil {
-		return nil, ErrInvalidCredentials
-	}
-
-	if strings.TrimSpace(user.NIP) != nip {
 		return nil, ErrInvalidCredentials
 	}
 

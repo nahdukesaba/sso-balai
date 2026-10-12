@@ -38,13 +38,11 @@ func NewKlinikMigrationService(
 func (s *KlinikMigrationService) Migrate(
 	ctx context.Context,
 	email string,
-	nip string,
 	password string,
 ) (*models.SupabaseAuthUser, error) {
 	klinikUser, err := s.credentialService.Verify(
 		ctx,
 		email,
-		nip,
 		password,
 	)
 	if err != nil {
