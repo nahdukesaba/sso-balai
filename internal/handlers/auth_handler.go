@@ -150,9 +150,9 @@ func (h *AuthHandler) KlinikContext(c *fiber.Ctx) error {
 		})
 	}
 
-	klinikUser, err := h.klinikContextService.GetByEmail(
+	klinikUser, err := h.klinikContextService.GetByAppUserID(
 		c.UserContext(),
-		identity.User.Email,
+		identity.User.ID,
 	)
 	if err != nil {
 		if errors.Is(

@@ -15,10 +15,11 @@ var (
 )
 
 type KlinikMigrationService struct {
-	credentialService *KlinikCredentialService
-	adminService      *SupabaseAdminService
-	userRepository    *repository.UserRepository
-	pegawaiRepository *repository.PegawaiRepository
+	credentialService    *KlinikCredentialService
+	adminService         *SupabaseAdminService
+	userRepository       *repository.UserRepository
+	pegawaiRepository    *repository.PegawaiRepository
+	klinikUserRepository *repository.KlinikUserRepository
 }
 
 func NewKlinikMigrationService(
@@ -26,12 +27,14 @@ func NewKlinikMigrationService(
 	adminService *SupabaseAdminService,
 	userRepository *repository.UserRepository,
 	pegawaiRepository *repository.PegawaiRepository,
+	klinikUserRepository *repository.KlinikUserRepository,
 ) *KlinikMigrationService {
 	return &KlinikMigrationService{
-		credentialService: credentialService,
-		adminService:      adminService,
-		userRepository:    userRepository,
-		pegawaiRepository: pegawaiRepository,
+		credentialService:    credentialService,
+		adminService:         adminService,
+		userRepository:       userRepository,
+		pegawaiRepository:    pegawaiRepository,
+		klinikUserRepository: klinikUserRepository,
 	}
 }
 
@@ -151,6 +154,30 @@ func (s *KlinikMigrationService) Migrate(
 		)
 	}
 
+	if err := s.klinikUserRepository.LinkAppUserID(
+		ctx,
+		klinikUser.ID,
+		authUser.ID,
+	); err != nil {
+		cleanupErr := s.cleanupCreatedIdentity(
+			ctx,
+			authUser.ID,
+		)
+
+		if cleanupErr != nil {
+			return nil, fmt.Errorf(
+				"link Klinik user to migrated identity: %w; cleanup failed: %v",
+				err,
+				cleanupErr,
+			)
+		}
+
+		return nil, fmt.Errorf(
+			"link Klinik user to migrated identity: %w",
+			err,
+		)
+	}
+
 	return authUser, nil
 }
 
@@ -159,6 +186,13 @@ func (s *KlinikMigrationService) cleanupCreatedIdentity(
 	authUserID string,
 ) error {
 	var cleanupErrors []error
+
+	if err := s.klinikUserRepository.UnlinkAppUserIDForMigration(
+		ctx,
+		authUserID,
+	); err != nil {
+		cleanupErrors = append(cleanupErrors, err)
+	}
 
 	if err := s.pegawaiRepository.DeleteByAppUserIDForMigration(
 		ctx,

@@ -24,19 +24,19 @@ func NewKlinikContextService(
 	}
 }
 
-func (s *KlinikContextService) GetByEmail(
+func (s *KlinikContextService) GetByAppUserID(
 	ctx context.Context,
-	email string,
+	appUserID string,
 ) (*models.KlinikUser, error) {
-	email = strings.TrimSpace(email)
+	appUserID = strings.TrimSpace(appUserID)
 
-	if email == "" {
+	if appUserID == "" {
 		return nil, ErrKlinikAccountUnavailable
 	}
 
-	user, err := s.klinikUserRepository.GetActiveByEmail(
+	user, err := s.klinikUserRepository.GetActiveByAppUserID(
 		ctx,
-		email,
+		appUserID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf(
