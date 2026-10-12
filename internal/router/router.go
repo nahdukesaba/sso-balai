@@ -17,6 +17,8 @@ func Register(
 	auth := api.Group("/auth")
 
 	auth.Post("/login", authHandler.Login)
+	auth.Post("/refresh", authHandler.Refresh)
+	auth.Post("/logout", authHandler.Logout)
 	auth.Get("/me", authMiddleware.RequireAuth, authHandler.Me)
 	auth.Get("/klinik-context", authMiddleware.RequireAuth, authHandler.KlinikContext)
 }

@@ -31,6 +31,10 @@ type passwordLoginRequest struct {
 	Password string `json:"password"`
 }
 
+type refreshTokenRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
 type supabaseTokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	TokenType    string `json:"token_type"`
@@ -154,6 +158,143 @@ func (s *SupabaseAuthService) SignInWithPassword(
 			Email: tokenResponse.User.Email,
 		},
 	}, nil
+}
+
+func (s *SupabaseAuthService) RefreshSession(
+	ctx context.Context,
+	refreshToken string,
+) (*models.SupabaseSession, error) {
+	refreshToken = strings.TrimSpace(refreshToken)
+
+	if refreshToken == "" {
+		return nil, ErrInvalidToken
+	}
+
+	payload := refreshTokenRequest{
+		RefreshToken: refreshToken,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal refresh request: %w", err)
+	}
+
+	endpoint := s.baseURL + "/auth/v1/token?grant_type=refresh_token"
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		endpoint,
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create refresh request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("apikey", s.apiKey)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrAuthUnavailable, err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// Continue.
+
+	case http.StatusBadRequest,
+		http.StatusUnauthorized,
+		http.StatusForbidden:
+		return nil, ErrInvalidToken
+
+	case http.StatusTooManyRequests:
+		return nil, ErrAuthRateLimited
+
+	default:
+		return nil, fmt.Errorf(
+			"%w: upstream returned status %d",
+			ErrAuthUnavailable,
+			resp.StatusCode,
+		)
+	}
+
+	var tokenResponse supabaseTokenResponse
+
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResponse); err != nil {
+		return nil, fmt.Errorf("decode refresh response: %w", err)
+	}
+
+	if tokenResponse.AccessToken == "" ||
+		tokenResponse.RefreshToken == "" ||
+		tokenResponse.User.ID == "" {
+		return nil, ErrAuthUnavailable
+	}
+
+	return &models.SupabaseSession{
+		AccessToken:  tokenResponse.AccessToken,
+		TokenType:    tokenResponse.TokenType,
+		ExpiresIn:    tokenResponse.ExpiresIn,
+		ExpiresAt:    tokenResponse.ExpiresAt,
+		RefreshToken: tokenResponse.RefreshToken,
+		User: models.SupabaseAuthUser{
+			ID:    tokenResponse.User.ID,
+			Email: tokenResponse.User.Email,
+		},
+	}, nil
+}
+
+func (s *SupabaseAuthService) SignOut(
+	ctx context.Context,
+	accessToken string,
+) error {
+	accessToken = strings.TrimSpace(accessToken)
+
+	if accessToken == "" {
+		return ErrInvalidToken
+	}
+
+	endpoint := s.baseURL + "/auth/v1/logout?scope=local"
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		endpoint,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("create logout request: %w", err)
+	}
+
+	req.Header.Set("apikey", s.apiKey)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrAuthUnavailable, err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK,
+		http.StatusNoContent:
+		return nil
+
+	case http.StatusUnauthorized,
+		http.StatusForbidden:
+		return ErrInvalidToken
+
+	case http.StatusTooManyRequests:
+		return ErrAuthRateLimited
+
+	default:
+		return fmt.Errorf(
+			"%w: upstream returned status %d",
+			ErrAuthUnavailable,
+			resp.StatusCode,
+		)
+	}
 }
 
 func (s *SupabaseAuthService) VerifyAccessToken(

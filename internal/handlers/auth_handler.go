@@ -31,12 +31,17 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
+type refreshRequest struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
 type loginResponse struct {
-	AccessToken string       `json:"accessToken"`
-	TokenType   string       `json:"tokenType"`
-	ExpiresIn   int          `json:"expiresIn"`
-	ExpiresAt   int64        `json:"expiresAt"`
-	User        userResponse `json:"user"`
+	AccessToken  string       `json:"accessToken"`
+	RefreshToken string       `json:"refreshToken"`
+	TokenType    string       `json:"tokenType"`
+	ExpiresIn    int          `json:"expiresIn"`
+	ExpiresAt    int64        `json:"expiresAt"`
+	User         userResponse `json:"user"`
 }
 
 type meResponse struct {
@@ -94,12 +99,82 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(loginResponse{
-		AccessToken: result.Session.AccessToken,
-		TokenType:   result.Session.TokenType,
-		ExpiresIn:   result.Session.ExpiresIn,
-		ExpiresAt:   result.Session.ExpiresAt,
-		User:        buildUserResponse(result.Identity),
+		AccessToken:  result.Session.AccessToken,
+		RefreshToken: result.Session.RefreshToken,
+		TokenType:    result.Session.TokenType,
+		ExpiresIn:    result.Session.ExpiresIn,
+		ExpiresAt:    result.Session.ExpiresAt,
+		User:         buildUserResponse(result.Identity),
 	})
+}
+
+func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
+	var request refreshRequest
+
+	if err := c.BodyParser(&request); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "invalid_request",
+			"message": "Request body tidak valid.",
+		})
+	}
+
+	request.RefreshToken = strings.TrimSpace(request.RefreshToken)
+
+	if request.RefreshToken == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "validation_error",
+			"message": "Refresh token wajib diisi.",
+		})
+	}
+
+	result, err := h.authService.Refresh(
+		c.UserContext(),
+		request.RefreshToken,
+	)
+	if err != nil {
+		return handleRefreshError(c, err)
+	}
+
+	return c.Status(fiber.StatusOK).JSON(loginResponse{
+		AccessToken:  result.Session.AccessToken,
+		RefreshToken: result.Session.RefreshToken,
+		TokenType:    result.Session.TokenType,
+		ExpiresIn:    result.Session.ExpiresIn,
+		ExpiresAt:    result.Session.ExpiresAt,
+		User:         buildUserResponse(result.Identity),
+	})
+}
+
+func (h *AuthHandler) Logout(c *fiber.Ctx) error {
+	header := strings.TrimSpace(c.Get(fiber.HeaderAuthorization))
+
+	if header == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error":   "missing_token",
+			"message": "Access token diperlukan.",
+		})
+	}
+
+	parts := strings.Fields(header)
+
+	if len(parts) != 2 ||
+		!strings.EqualFold(parts[0], "Bearer") ||
+		strings.TrimSpace(parts[1]) == "" {
+
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error":   "invalid_token",
+			"message": "Format access token tidak valid.",
+		})
+	}
+
+	if err := h.authService.Logout(
+		c.UserContext(),
+		parts[1],
+	); err != nil {
+		return handleLogoutError(c, err)
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
 }
 
 func (h *AuthHandler) Me(c *fiber.Ctx) error {
@@ -220,6 +295,80 @@ func handleLoginError(c *fiber.Ctx, err error) error {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error":   "identity_conflict",
 			"message": "Identitas akun tidak dapat dimigrasikan secara otomatis.",
+		})
+
+	case errors.Is(err, services.ErrAuthUnavailable):
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error":   "auth_unavailable",
+			"message": "Layanan autentikasi sedang tidak tersedia.",
+		})
+
+	default:
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":   "internal_error",
+			"message": "Terjadi kesalahan pada server.",
+		})
+	}
+}
+
+func handleRefreshError(c *fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, services.ErrInvalidToken):
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error":   "invalid_refresh_token",
+			"message": "Refresh token tidak valid atau sudah kedaluwarsa.",
+		})
+
+	case errors.Is(err, services.ErrAccountPending):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":   "account_pending",
+			"message": "Akun masih menunggu persetujuan.",
+		})
+
+	case errors.Is(err, services.ErrAccountRejected):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":   "account_rejected",
+			"message": "Akun tidak memiliki akses.",
+		})
+
+	case errors.Is(err, services.ErrAccountUnavailable):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":   "account_unavailable",
+			"message": "Akun tidak tersedia.",
+		})
+
+	case errors.Is(err, services.ErrAuthRateLimited):
+		return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+			"error":   "rate_limited",
+			"message": "Terlalu banyak permintaan autentikasi. Coba kembali nanti.",
+		})
+
+	case errors.Is(err, services.ErrAuthUnavailable):
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error":   "auth_unavailable",
+			"message": "Layanan autentikasi sedang tidak tersedia.",
+		})
+
+	default:
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":   "internal_error",
+			"message": "Terjadi kesalahan pada server.",
+		})
+	}
+}
+
+func handleLogoutError(c *fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, services.ErrInvalidToken):
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error":   "invalid_token",
+			"message": "Access token tidak valid atau sudah kedaluwarsa.",
+		})
+
+	case errors.Is(err, services.ErrAuthRateLimited):
+		return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+			"error":   "rate_limited",
+			"message": "Terlalu banyak permintaan autentikasi. Coba kembali nanti.",
 		})
 
 	case errors.Is(err, services.ErrAuthUnavailable):

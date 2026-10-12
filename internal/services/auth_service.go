@@ -94,6 +94,54 @@ func (s *AuthService) Login(
 	}, nil
 }
 
+func (s *AuthService) Refresh(
+	ctx context.Context,
+	refreshToken string,
+) (*models.LoginResult, error) {
+	refreshToken = strings.TrimSpace(refreshToken)
+
+	if refreshToken == "" {
+		return nil, ErrInvalidToken
+	}
+
+	session, err := s.supabaseAuthService.RefreshSession(
+		ctx,
+		refreshToken,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	identity, err := s.loadApprovedIdentity(
+		ctx,
+		session.User.ID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &models.LoginResult{
+		Session:  session,
+		Identity: identity,
+	}, nil
+}
+
+func (s *AuthService) Logout(
+	ctx context.Context,
+	accessToken string,
+) error {
+	accessToken = strings.TrimSpace(accessToken)
+
+	if accessToken == "" {
+		return ErrInvalidToken
+	}
+
+	return s.supabaseAuthService.SignOut(
+		ctx,
+		accessToken,
+	)
+}
+
 func (s *AuthService) AuthenticateAccessToken(
 	ctx context.Context,
 	accessToken string,
