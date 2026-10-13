@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrInvalidToken       = errors.New("invalid access token")
+	ErrInvalidPassword    = errors.New("invalid password")
+	ErrSamePassword       = errors.New("new password must be different from old password")
 	ErrAuthRateLimited    = errors.New("too many authentication attempts")
 	ErrAuthUnavailable    = errors.New("authentication service unavailable")
 )
@@ -33,6 +36,14 @@ type passwordLoginRequest struct {
 
 type refreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token"`
+}
+
+type passwordRecoveryRequest struct {
+	Email string `json:"email"`
+}
+
+type updatePasswordRequest struct {
+	Password string `json:"password"`
 }
 
 type supabaseTokenResponse struct {
@@ -158,6 +169,75 @@ func (s *SupabaseAuthService) SignInWithPassword(
 			Email: tokenResponse.User.Email,
 		},
 	}, nil
+}
+
+func (s *SupabaseAuthService) RequestPasswordRecovery(
+	ctx context.Context,
+	email string,
+	redirectURL string,
+) error {
+	email = strings.TrimSpace(email)
+	redirectURL = strings.TrimSpace(redirectURL)
+
+	if email == "" {
+		return ErrInvalidCredentials
+	}
+
+	if redirectURL == "" {
+		return fmt.Errorf(
+			"%w: password recovery redirect URL is not configured",
+			ErrAuthUnavailable,
+		)
+	}
+
+	payload := passwordRecoveryRequest{
+		Email: email,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal password recovery request: %w", err)
+	}
+
+	query := url.Values{}
+	query.Set("redirect_to", redirectURL)
+
+	endpoint := s.baseURL + "/auth/v1/recover?" + query.Encode()
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		endpoint,
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return fmt.Errorf("create password recovery request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("apikey", s.apiKey)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrAuthUnavailable, err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK,
+		http.StatusNoContent:
+		return nil
+
+	case http.StatusTooManyRequests:
+		return ErrAuthRateLimited
+
+	default:
+		return fmt.Errorf(
+			"%w: recovery upstream returned status %d",
+			ErrAuthUnavailable,
+			resp.StatusCode,
+		)
+	}
 }
 
 func (s *SupabaseAuthService) RefreshSession(
@@ -291,6 +371,86 @@ func (s *SupabaseAuthService) SignOut(
 	default:
 		return fmt.Errorf(
 			"%w: upstream returned status %d",
+			ErrAuthUnavailable,
+			resp.StatusCode,
+		)
+	}
+}
+
+func (s *SupabaseAuthService) UpdatePassword(
+	ctx context.Context,
+	accessToken string,
+	password string,
+) error {
+	accessToken = strings.TrimSpace(accessToken)
+
+	if accessToken == "" {
+		return ErrInvalidToken
+	}
+
+	if password == "" {
+		return ErrInvalidPassword
+	}
+
+	payload := updatePasswordRequest{
+		Password: password,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal password update request: %w", err)
+	}
+
+	endpoint := s.baseURL + "/auth/v1/user"
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPut,
+		endpoint,
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return fmt.Errorf("create password update request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("apikey", s.apiKey)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrAuthUnavailable, err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+
+	case http.StatusBadRequest,
+		http.StatusUnprocessableEntity:
+		var upstreamError struct {
+			ErrorCode string `json:"error_code"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&upstreamError); err == nil {
+			if upstreamError.ErrorCode == "same_password" {
+				return ErrSamePassword
+			}
+		}
+
+		return ErrInvalidPassword
+
+	case http.StatusUnauthorized,
+		http.StatusForbidden:
+		return ErrInvalidToken
+
+	case http.StatusTooManyRequests:
+		return ErrAuthRateLimited
+
+	default:
+		return fmt.Errorf(
+			"%w: password update upstream returned status %d",
 			ErrAuthUnavailable,
 			resp.StatusCode,
 		)

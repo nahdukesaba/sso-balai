@@ -9,26 +9,33 @@ import (
 )
 
 var (
-	ErrAccountPending     = errors.New("account is pending approval")
-	ErrAccountRejected    = errors.New("account is rejected")
-	ErrAccountUnavailable = errors.New("account is unavailable")
+	ErrAccountPending         = errors.New("account is pending approval")
+	ErrAccountRejected        = errors.New("account is rejected")
+	ErrAccountUnavailable     = errors.New("account is unavailable")
+	ErrInvalidRecoveryRequest = errors.New("invalid password recovery request")
+	ErrUnsupportedApplication = errors.New("unsupported application")
 )
 
 type AuthService struct {
-	supabaseAuthService    *SupabaseAuthService
-	identityService        *IdentityService
-	klinikMigrationService *KlinikMigrationService
+	supabaseAuthService               *SupabaseAuthService
+	identityService                   *IdentityService
+	klinikMigrationService            *KlinikMigrationService
+	klinikPasswordRecoveryRedirectURL string
 }
 
 func NewAuthService(
 	supabaseAuthService *SupabaseAuthService,
 	identityService *IdentityService,
 	klinikMigrationService *KlinikMigrationService,
+	klinikPasswordRecoveryRedirectURL string,
 ) *AuthService {
 	return &AuthService{
 		supabaseAuthService:    supabaseAuthService,
 		identityService:        identityService,
 		klinikMigrationService: klinikMigrationService,
+		klinikPasswordRecoveryRedirectURL: strings.TrimSpace(
+			klinikPasswordRecoveryRedirectURL,
+		),
 	}
 }
 
@@ -92,6 +99,64 @@ func (s *AuthService) Login(
 		Session:  session,
 		Identity: identity,
 	}, nil
+}
+
+func (s *AuthService) RequestPasswordRecovery(
+	ctx context.Context,
+	email string,
+	application string,
+) error {
+	email = strings.TrimSpace(email)
+	application = strings.TrimSpace(application)
+
+	if email == "" {
+		return ErrInvalidRecoveryRequest
+	}
+
+	var redirectURL string
+
+	switch application {
+	case "klinik_pkp":
+		redirectURL = s.klinikPasswordRecoveryRedirectURL
+
+	default:
+		return ErrUnsupportedApplication
+	}
+
+	if strings.TrimSpace(redirectURL) == "" {
+		return ErrAuthUnavailable
+	}
+
+	return s.supabaseAuthService.RequestPasswordRecovery(
+		ctx,
+		email,
+		redirectURL,
+	)
+}
+
+func (s *AuthService) ResetPassword(
+	ctx context.Context,
+	accessToken string,
+	password string,
+) error {
+	accessToken = strings.TrimSpace(accessToken)
+
+	if accessToken == "" {
+		return ErrInvalidToken
+	}
+
+	if len(password) < 8 ||
+		len(password) > 128 ||
+		strings.TrimSpace(password) == "" {
+
+		return ErrInvalidPassword
+	}
+
+	return s.supabaseAuthService.UpdatePassword(
+		ctx,
+		accessToken,
+		password,
+	)
 }
 
 func (s *AuthService) Refresh(

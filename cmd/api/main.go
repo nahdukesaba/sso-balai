@@ -76,6 +76,7 @@ func main() {
 		supabaseAuthService,
 		identityService,
 		klinikMigrationService,
+		cfg.KlinikPasswordRecoveryRedirectURL,
 	)
 
 	authHandler := handlers.NewAuthHandler(authService, klinikContextService)

@@ -17,6 +17,8 @@ func Register(
 	auth := api.Group("/auth")
 
 	auth.Post("/login", authHandler.Login)
+	auth.Post("/forgot-password", authHandler.ForgotPassword)
+	auth.Post("/reset-password", authHandler.ResetPassword)
 	auth.Post("/refresh", authHandler.Refresh)
 	auth.Post("/logout", authHandler.Logout)
 	auth.Get("/me", authMiddleware.RequireAuth, authHandler.Me)
