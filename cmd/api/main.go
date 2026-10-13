@@ -75,6 +75,8 @@ func main() {
 	authService := services.NewAuthService(
 		supabaseAuthService,
 		identityService,
+		userRepository,
+		klinikContextService,
 		klinikMigrationService,
 		cfg.KlinikPasswordRecoveryRedirectURL,
 	)
