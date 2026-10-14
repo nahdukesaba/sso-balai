@@ -331,6 +331,36 @@ func (h *AuthHandler) KlinikContext(c *fiber.Ctx) error {
 		})
 	}
 
+	appContext, err := h.applicationContextService.GetByAppUserID(
+		c.UserContext(),
+		identity.User.ID,
+		models.ApplicationCodeKlinikPKP,
+	)
+	if err != nil {
+		if errors.Is(err, services.ErrApplicationUnavailable) ||
+			errors.Is(err, services.ErrApplicationMembershipUnavailable) {
+
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error":   "klinik_account_unavailable",
+				"message": "Pengguna tidak memiliki akses aktif ke Klinik PKP.",
+			})
+		}
+
+		return c.Status(
+			fiber.StatusInternalServerError,
+		).JSON(fiber.Map{
+			"error":   "internal_error",
+			"message": "Terjadi kesalahan pada server.",
+		})
+	}
+
+	if appContext.Status != models.MembershipStatusApproved {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":   "klinik_account_unavailable",
+			"message": "Pengguna tidak memiliki akses aktif ke Klinik PKP.",
+		})
+	}
+
 	klinikUser, err := h.klinikContextService.GetByAppUserID(
 		c.UserContext(),
 		identity.User.ID,
@@ -360,7 +390,7 @@ func (h *AuthHandler) KlinikContext(c *fiber.Ctx) error {
 		klinikContextResponse{
 			ID:    klinikUser.ID,
 			Email: klinikUser.Email,
-			Role:  klinikUser.Role,
+			Role:  appContext.Role,
 		},
 	)
 }
