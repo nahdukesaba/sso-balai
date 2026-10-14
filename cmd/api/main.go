@@ -81,6 +81,7 @@ func main() {
 
 	authService := services.NewAuthService(
 		supabaseAuthService,
+		supabaseAdminService,
 		identityService,
 		userRepository,
 		klinikContextService,

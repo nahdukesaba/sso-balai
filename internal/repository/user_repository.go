@@ -214,6 +214,50 @@ func (r *UserRepository) CreateMigratedUser(
 	return user, nil
 }
 
+// CreateCentralUser creates the central profile that corresponds to a
+// Supabase Auth identity.
+//
+// role/status are compatibility values for the legacy app_users schema only.
+// Application authorization must come from app_memberships.
+func (r *UserRepository) CreateCentralUser(
+	ctx context.Context,
+	id string,
+	email string,
+	fullName string,
+	phone *string,
+) (*models.AppUser, error) {
+	row := r.pool.QueryRow(
+		ctx,
+		`
+		INSERT INTO public.app_users (
+			id,
+			email,
+			full_name,
+			role,
+			status,
+			phone
+		)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING `+userColumns,
+		id,
+		email,
+		fullName,
+		"user",
+		models.UserStatusPending,
+		phone,
+	)
+
+	user, err := scanUser(row)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"create central app user: %w",
+			err,
+		)
+	}
+
+	return user, nil
+}
+
 func (r *UserRepository) DeleteByIDForMigration(
 	ctx context.Context,
 	id string,

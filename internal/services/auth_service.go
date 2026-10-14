@@ -3,22 +3,27 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/nahdukesaba/sso-balai/internal/models"
 	"github.com/nahdukesaba/sso-balai/internal/repository"
 )
 
 var (
-	ErrAccountPending         = errors.New("account is pending approval")
-	ErrAccountRejected        = errors.New("account is rejected")
-	ErrAccountUnavailable     = errors.New("account is unavailable")
-	ErrInvalidRecoveryRequest = errors.New("invalid password recovery request")
-	ErrUnsupportedApplication = errors.New("unsupported application")
+	ErrAccountPending               = errors.New("account is pending approval")
+	ErrAccountRejected              = errors.New("account is rejected")
+	ErrAccountUnavailable           = errors.New("account is unavailable")
+	ErrAccountAlreadyExists         = errors.New("central account already exists")
+	ErrRegistrationIdentityConflict = errors.New("central identity conflict")
+	ErrInvalidRecoveryRequest       = errors.New("invalid password recovery request")
+	ErrUnsupportedApplication       = errors.New("unsupported application")
 )
 
 type AuthService struct {
 	supabaseAuthService               *SupabaseAuthService
+	adminService                      *SupabaseAdminService
 	identityService                   *IdentityService
 	userRepository                    *repository.UserRepository
 	klinikContextService              *KlinikContextService
@@ -29,6 +34,7 @@ type AuthService struct {
 
 func NewAuthService(
 	supabaseAuthService *SupabaseAuthService,
+	adminService *SupabaseAdminService,
 	identityService *IdentityService,
 	userRepository *repository.UserRepository,
 	klinikContextService *KlinikContextService,
@@ -38,6 +44,7 @@ func NewAuthService(
 ) *AuthService {
 	return &AuthService{
 		supabaseAuthService:       supabaseAuthService,
+		adminService:              adminService,
 		identityService:           identityService,
 		userRepository:            userRepository,
 		klinikContextService:      klinikContextService,
@@ -47,6 +54,139 @@ func NewAuthService(
 			klinikPasswordRecoveryRedirectURL,
 		),
 	}
+}
+
+// RegisterCentralIdentity creates an Akun Balai only.
+//
+// It deliberately does not create any application membership. SILAPET,
+// Klinik PKP, Arsiparis, and future applications own their own authorization.
+func (s *AuthService) RegisterCentralIdentity(
+	ctx context.Context,
+	email string,
+	password string,
+	fullName string,
+	phone string,
+) (*models.Identity, error) {
+	email = strings.TrimSpace(email)
+	fullName = strings.TrimSpace(fullName)
+	phone = strings.TrimSpace(phone)
+
+	if s.adminService == nil {
+		return nil, ErrAuthUnavailable
+	}
+
+	authUser, err := s.adminService.FindUserByEmail(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+
+	appUserByEmail, err :=
+		s.userRepository.GetByEmailIncludingDeleted(ctx, email)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"find central profile by email: %w",
+			err,
+		)
+	}
+
+	if authUser != nil {
+		appUserByID, err :=
+			s.userRepository.GetByIDIncludingDeleted(
+				ctx,
+				authUser.ID,
+			)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"find central profile by auth id: %w",
+				err,
+			)
+		}
+
+		if appUserByID != nil &&
+			appUserByID.DeletedAt == nil &&
+			strings.EqualFold(appUserByID.Email, email) {
+
+			return nil, ErrAccountAlreadyExists
+		}
+
+		return nil, ErrRegistrationIdentityConflict
+	}
+
+	// A profile without its matching Supabase Auth identity is inconsistent.
+	// Public registration must never silently relink or repair it.
+	if appUserByEmail != nil {
+		return nil, ErrRegistrationIdentityConflict
+	}
+
+	createdAuthUser, err := s.adminService.CreateUser(
+		ctx,
+		email,
+		password,
+		fullName,
+	)
+	if err != nil {
+		// Protect against a create race: if another request created the same
+		// Auth identity first, surface the normal account-exists result.
+		existing, lookupErr :=
+			s.adminService.FindUserByEmail(ctx, email)
+
+		if lookupErr == nil && existing != nil {
+			return nil, ErrAccountAlreadyExists
+		}
+
+		return nil, err
+	}
+
+	if strings.HasPrefix(phone, "0") {
+		phone = "62" + phone[1:]
+	}
+
+	var phonePtr *string
+	if phone != "" {
+		phonePtr = &phone
+	}
+
+	appUser, err := s.userRepository.CreateCentralUser(
+		ctx,
+		createdAuthUser.ID,
+		createdAuthUser.Email,
+		fullName,
+		phonePtr,
+	)
+	if err != nil {
+		// Supabase Auth and Postgres cannot participate in one transaction.
+		// If profile creation fails, explicitly compensate by deleting the
+		// newly-created Auth identity.
+		rollbackCtx, cancel :=
+			context.WithTimeout(
+				context.Background(),
+				5*time.Second,
+			)
+		defer cancel()
+
+		rollbackErr := s.adminService.DeleteUser(
+			rollbackCtx,
+			createdAuthUser.ID,
+		)
+
+		if rollbackErr != nil {
+			return nil, fmt.Errorf(
+				"create central profile: %v; rollback auth identity: %w",
+				err,
+				rollbackErr,
+			)
+		}
+
+		return nil, fmt.Errorf(
+			"create central profile: %w",
+			err,
+		)
+	}
+
+	return &models.Identity{
+		User:    appUser,
+		Pegawai: nil,
+	}, nil
 }
 
 func (s *AuthService) Login(

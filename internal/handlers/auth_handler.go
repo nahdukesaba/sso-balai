@@ -35,6 +35,13 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
+type registerRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	FullName string `json:"fullName"`
+	Phone    string `json:"phone"`
+}
+
 type refreshRequest struct {
 	RefreshToken string `json:"refreshToken"`
 }
@@ -118,6 +125,92 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		ExpiresIn:    result.Session.ExpiresIn,
 		ExpiresAt:    result.Session.ExpiresAt,
 		User:         buildUserResponse(result.Identity),
+	})
+}
+
+func (h *AuthHandler) Register(c *fiber.Ctx) error {
+	var request registerRequest
+
+	if err := c.BodyParser(&request); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "invalid_request",
+			"message": "Request body tidak valid.",
+		})
+	}
+
+	request.Email = strings.TrimSpace(request.Email)
+	request.FullName = strings.TrimSpace(request.FullName)
+	request.Phone = strings.TrimSpace(request.Phone)
+
+	if request.Email == "" ||
+		request.Password == "" ||
+		request.FullName == "" {
+
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "validation_error",
+			"message": "Email, password, dan nama lengkap wajib diisi.",
+		})
+	}
+
+	parsedEmail, err := mail.ParseAddress(request.Email)
+	if err != nil ||
+		parsedEmail.Address == "" ||
+		!strings.EqualFold(parsedEmail.Address, request.Email) {
+
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "validation_error",
+			"message": "Format email tidak valid.",
+		})
+	}
+
+	if len(request.Password) < 8 ||
+		len(request.Password) > 128 {
+
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "invalid_password",
+			"message": "Password harus terdiri dari 8 sampai 128 karakter.",
+		})
+	}
+
+	identity, err := h.authService.RegisterCentralIdentity(
+		c.UserContext(),
+		request.Email,
+		request.Password,
+		request.FullName,
+		request.Phone,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrAccountAlreadyExists):
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error":   "account_already_exists",
+				"message": "Akun Balai dengan email tersebut sudah tersedia. Silakan masuk menggunakan akun yang sudah ada.",
+			})
+
+		case errors.Is(err, services.ErrRegistrationIdentityConflict):
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error":   "identity_conflict",
+				"message": "Identitas akun tidak dapat dibuat secara otomatis.",
+			})
+
+		case errors.Is(err, services.ErrAdminUnavailable),
+			errors.Is(err, services.ErrAuthUnavailable):
+
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"error":   "auth_unavailable",
+				"message": "Layanan autentikasi sedang tidak tersedia.",
+			})
+
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error":   "internal_error",
+				"message": "Terjadi kesalahan pada server.",
+			})
+		}
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"user": buildUserResponse(identity),
 	})
 }
 
