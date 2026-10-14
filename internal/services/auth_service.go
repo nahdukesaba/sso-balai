@@ -94,7 +94,7 @@ func (s *AuthService) Login(
 		}
 	}
 
-	identity, err := s.loadApprovedIdentity(
+	identity, err := s.loadCentralIdentity(
 		ctx,
 		session.User.ID,
 	)
@@ -229,7 +229,7 @@ func (s *AuthService) Refresh(
 		return nil, err
 	}
 
-	identity, err := s.loadApprovedIdentity(
+	identity, err := s.loadCentralIdentity(
 		ctx,
 		session.User.ID,
 	)
@@ -271,10 +271,13 @@ func (s *AuthService) AuthenticateAccessToken(
 		return nil, err
 	}
 
-	return s.loadApprovedIdentity(ctx, authUser.ID)
+	return s.loadCentralIdentity(ctx, authUser.ID)
 }
 
-func (s *AuthService) loadApprovedIdentity(
+// loadCentralIdentity validates only the availability of the central
+// identity. Application-specific authorization is resolved separately
+// through app_memberships.
+func (s *AuthService) loadCentralIdentity(
 	ctx context.Context,
 	userID string,
 ) (*models.Identity, error) {
@@ -291,17 +294,5 @@ func (s *AuthService) loadApprovedIdentity(
 		return nil, ErrAccountUnavailable
 	}
 
-	switch identity.User.Status {
-	case models.UserStatusApproved:
-		return identity, nil
-
-	case models.UserStatusPending:
-		return nil, ErrAccountPending
-
-	case models.UserStatusRejected:
-		return nil, ErrAccountRejected
-
-	default:
-		return nil, ErrAccountUnavailable
-	}
+	return identity, nil
 }
