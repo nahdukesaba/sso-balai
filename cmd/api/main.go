@@ -31,6 +31,8 @@ func main() {
 	userRepository := repository.NewUserRepository(db)
 	pegawaiRepository := repository.NewPegawaiRepository(db)
 	klinikUserRepository := repository.NewKlinikUserRepository(db)
+	applicationRepository := repository.NewApplicationRepository(db)
+	membershipRepository := repository.NewMembershipRepository(db)
 
 	identityService := services.NewIdentityService(
 		userRepository,
@@ -39,6 +41,11 @@ func main() {
 
 	klinikContextService := services.NewKlinikContextService(
 		klinikUserRepository,
+	)
+
+	applicationContextService := services.NewApplicationContextService(
+		applicationRepository,
+		membershipRepository,
 	)
 
 	supabaseAuthService, err := services.NewSupabaseAuthService(
@@ -81,7 +88,11 @@ func main() {
 		cfg.KlinikPasswordRecoveryRedirectURL,
 	)
 
-	authHandler := handlers.NewAuthHandler(authService, klinikContextService)
+	authHandler := handlers.NewAuthHandler(
+		authService,
+		klinikContextService,
+		applicationContextService,
+	)
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 	app := fiber.New()
 

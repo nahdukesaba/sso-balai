@@ -13,17 +13,20 @@ import (
 )
 
 type AuthHandler struct {
-	authService          *services.AuthService
-	klinikContextService *services.KlinikContextService
+	authService               *services.AuthService
+	klinikContextService      *services.KlinikContextService
+	applicationContextService *services.ApplicationContextService
 }
 
 func NewAuthHandler(
 	authService *services.AuthService,
 	klinikContextService *services.KlinikContextService,
+	applicationContextService *services.ApplicationContextService,
 ) *AuthHandler {
 	return &AuthHandler{
-		authService:          authService,
-		klinikContextService: klinikContextService,
+		authService:               authService,
+		klinikContextService:      klinikContextService,
+		applicationContextService: applicationContextService,
 	}
 }
 
@@ -360,6 +363,63 @@ func (h *AuthHandler) KlinikContext(c *fiber.Ctx) error {
 			Role:  klinikUser.Role,
 		},
 	)
+}
+
+func (h *AuthHandler) ApplicationContext(c *fiber.Ctx) error {
+	identity, ok := middleware.GetAuthenticatedIdentity(c)
+	if !ok ||
+		identity == nil ||
+		identity.User == nil {
+
+		return c.Status(
+			fiber.StatusInternalServerError,
+		).JSON(fiber.Map{
+			"error":   "internal_error",
+			"message": "Identitas pengguna tidak tersedia.",
+		})
+	}
+
+	applicationCode := strings.TrimSpace(c.Query("application"))
+	if applicationCode == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "validation_error",
+			"message": "Parameter application wajib diisi.",
+		})
+	}
+
+	appContext, err := h.applicationContextService.GetByAppUserID(
+		c.UserContext(),
+		identity.User.ID,
+		applicationCode,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrApplicationUnavailable):
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error":   "application_unavailable",
+				"message": "Aplikasi tidak tersedia.",
+			})
+
+		case errors.Is(
+			err,
+			services.ErrApplicationMembershipUnavailable,
+		):
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error":   "application_access_unavailable",
+				"message": "Pengguna tidak terdaftar pada aplikasi ini.",
+			})
+
+		default:
+			return c.Status(
+				fiber.StatusInternalServerError,
+			).JSON(fiber.Map{
+				"error":   "internal_error",
+				"message": "Terjadi kesalahan pada server.",
+			})
+		}
+	}
+
+	return c.Status(fiber.StatusOK).JSON(appContext)
 }
 
 func handleResetPasswordError(
