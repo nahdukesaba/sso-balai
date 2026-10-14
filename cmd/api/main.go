@@ -84,6 +84,7 @@ func main() {
 		identityService,
 		userRepository,
 		klinikContextService,
+		applicationContextService,
 		klinikMigrationService,
 		cfg.KlinikPasswordRecoveryRedirectURL,
 	)

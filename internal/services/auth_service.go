@@ -22,6 +22,7 @@ type AuthService struct {
 	identityService                   *IdentityService
 	userRepository                    *repository.UserRepository
 	klinikContextService              *KlinikContextService
+	applicationContextService         *ApplicationContextService
 	klinikMigrationService            *KlinikMigrationService
 	klinikPasswordRecoveryRedirectURL string
 }
@@ -31,15 +32,17 @@ func NewAuthService(
 	identityService *IdentityService,
 	userRepository *repository.UserRepository,
 	klinikContextService *KlinikContextService,
+	applicationContextService *ApplicationContextService,
 	klinikMigrationService *KlinikMigrationService,
 	klinikPasswordRecoveryRedirectURL string,
 ) *AuthService {
 	return &AuthService{
-		supabaseAuthService:    supabaseAuthService,
-		identityService:        identityService,
-		userRepository:         userRepository,
-		klinikContextService:   klinikContextService,
-		klinikMigrationService: klinikMigrationService,
+		supabaseAuthService:       supabaseAuthService,
+		identityService:           identityService,
+		userRepository:            userRepository,
+		klinikContextService:      klinikContextService,
+		applicationContextService: applicationContextService,
+		klinikMigrationService:    klinikMigrationService,
 		klinikPasswordRecoveryRedirectURL: strings.TrimSpace(
 			klinikPasswordRecoveryRedirectURL,
 		),
@@ -159,7 +162,10 @@ func (s *AuthService) isKlinikPasswordRecoveryEligible(
 	ctx context.Context,
 	email string,
 ) (bool, error) {
-	if s.userRepository == nil || s.klinikContextService == nil {
+	if s.userRepository == nil ||
+		s.klinikContextService == nil ||
+		s.applicationContextService == nil {
+
 		return false, ErrAuthUnavailable
 	}
 
@@ -168,9 +174,26 @@ func (s *AuthService) isKlinikPasswordRecoveryEligible(
 		return false, err
 	}
 
-	if user == nil ||
-		user.DeletedAt != nil ||
-		user.Status != models.UserStatusApproved {
+	if user == nil || user.DeletedAt != nil {
+		return false, nil
+	}
+
+	appContext, err := s.applicationContextService.GetByAppUserID(
+		ctx,
+		user.ID,
+		models.ApplicationCodeKlinikPKP,
+	)
+	if err != nil {
+		if errors.Is(err, ErrApplicationUnavailable) ||
+			errors.Is(err, ErrApplicationMembershipUnavailable) {
+
+			return false, nil
+		}
+
+		return false, err
+	}
+
+	if appContext.Status != models.MembershipStatusApproved {
 		return false, nil
 	}
 
