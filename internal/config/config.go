@@ -16,7 +16,8 @@ type Config struct {
 	SupabasePublicKey string
 	SupabaseAdminKey  string
 
-	KlinikPasswordRecoveryRedirectURL string
+	KlinikPasswordRecoveryRedirectURL  string
+	SilapetPasswordRecoveryRedirectURL string
 
 	BootstrapEmail    string
 	BootstrapPassword string
@@ -46,6 +47,9 @@ func Load() (*Config, error) {
 
 		KlinikPasswordRecoveryRedirectURL: os.Getenv(
 			"KLINIK_PASSWORD_RECOVERY_REDIRECT_URL",
+		),
+		SilapetPasswordRecoveryRedirectURL: os.Getenv(
+			"SILAPET_PASSWORD_RECOVERY_REDIRECT_URL",
 		),
 
 		BootstrapEmail:    os.Getenv("BOOTSTRAP_USER_EMAIL"),

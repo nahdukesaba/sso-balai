@@ -55,6 +55,11 @@ type resetPasswordRequest struct {
 	Password string `json:"password"`
 }
 
+type changePasswordRequest struct {
+	OldPassword string `json:"oldPassword"`
+	NewPassword string `json:"newPassword"`
+}
+
 type loginResponse struct {
 	AccessToken  string       `json:"accessToken"`
 	RefreshToken string       `json:"refreshToken"`
@@ -307,6 +312,75 @@ func (h *AuthHandler) ResetPassword(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
+func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
+	identity, ok := middleware.GetAuthenticatedIdentity(c)
+	if !ok ||
+		identity == nil ||
+		identity.User == nil {
+
+		return c.Status(
+			fiber.StatusInternalServerError,
+		).JSON(fiber.Map{
+			"error":   "internal_error",
+			"message": "Identitas pengguna tidak tersedia.",
+		})
+	}
+
+	var request changePasswordRequest
+
+	if err := c.BodyParser(&request); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "invalid_request",
+			"message": "Request body tidak valid.",
+		})
+	}
+
+	if request.OldPassword == "" ||
+		request.NewPassword == "" {
+
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "validation_error",
+			"message": "Password lama dan password baru wajib diisi.",
+		})
+	}
+
+	if len(request.NewPassword) < 8 ||
+		len(request.NewPassword) > 128 {
+
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "invalid_password",
+			"message": "Password baru harus terdiri dari 8 sampai 128 karakter.",
+		})
+	}
+
+	header := strings.TrimSpace(
+		c.Get(fiber.HeaderAuthorization),
+	)
+	parts := strings.Fields(header)
+
+	if len(parts) != 2 ||
+		!strings.EqualFold(parts[0], "Bearer") ||
+		strings.TrimSpace(parts[1]) == "" {
+
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error":   "invalid_token",
+			"message": "Format access token tidak valid.",
+		})
+	}
+
+	if err := h.authService.ChangePassword(
+		c.UserContext(),
+		parts[1],
+		identity.User.Email,
+		request.OldPassword,
+		request.NewPassword,
+	); err != nil {
+		return handleChangePasswordError(c, err)
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
 func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 	var request refreshRequest
 
@@ -543,6 +617,55 @@ func (h *AuthHandler) ApplicationContext(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(appContext)
+}
+
+func handleChangePasswordError(
+	c *fiber.Ctx,
+	err error,
+) error {
+	switch {
+	case errors.Is(err, services.ErrInvalidCurrentPassword):
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error":   "invalid_password",
+			"message": "Password saat ini tidak benar.",
+		})
+
+	case errors.Is(err, services.ErrSamePassword):
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "same_password",
+			"message": "Password baru harus berbeda dari password sebelumnya.",
+		})
+
+	case errors.Is(err, services.ErrInvalidPassword):
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "invalid_password",
+			"message": "Password baru tidak memenuhi ketentuan.",
+		})
+
+	case errors.Is(err, services.ErrInvalidToken):
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error":   "invalid_token",
+			"message": "Sesi autentikasi tidak valid atau sudah kedaluwarsa.",
+		})
+
+	case errors.Is(err, services.ErrAuthRateLimited):
+		return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+			"error":   "rate_limited",
+			"message": "Terlalu banyak permintaan. Coba kembali nanti.",
+		})
+
+	case errors.Is(err, services.ErrAuthUnavailable):
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error":   "auth_unavailable",
+			"message": "Layanan autentikasi sedang tidak tersedia.",
+		})
+
+	default:
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":   "internal_error",
+			"message": "Terjadi kesalahan pada server.",
+		})
+	}
 }
 
 func handleResetPasswordError(

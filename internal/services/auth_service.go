@@ -18,18 +18,20 @@ var (
 	ErrAccountAlreadyExists         = errors.New("central account already exists")
 	ErrRegistrationIdentityConflict = errors.New("central identity conflict")
 	ErrInvalidRecoveryRequest       = errors.New("invalid password recovery request")
+	ErrInvalidCurrentPassword       = errors.New("invalid current password")
 	ErrUnsupportedApplication       = errors.New("unsupported application")
 )
 
 type AuthService struct {
-	supabaseAuthService               *SupabaseAuthService
-	adminService                      *SupabaseAdminService
-	identityService                   *IdentityService
-	userRepository                    *repository.UserRepository
-	klinikContextService              *KlinikContextService
-	applicationContextService         *ApplicationContextService
-	klinikMigrationService            *KlinikMigrationService
-	klinikPasswordRecoveryRedirectURL string
+	supabaseAuthService                *SupabaseAuthService
+	adminService                       *SupabaseAdminService
+	identityService                    *IdentityService
+	userRepository                     *repository.UserRepository
+	klinikContextService               *KlinikContextService
+	applicationContextService          *ApplicationContextService
+	klinikMigrationService             *KlinikMigrationService
+	klinikPasswordRecoveryRedirectURL  string
+	silapetPasswordRecoveryRedirectURL string
 }
 
 func NewAuthService(
@@ -41,6 +43,7 @@ func NewAuthService(
 	applicationContextService *ApplicationContextService,
 	klinikMigrationService *KlinikMigrationService,
 	klinikPasswordRecoveryRedirectURL string,
+	silapetPasswordRecoveryRedirectURL string,
 ) *AuthService {
 	return &AuthService{
 		supabaseAuthService:       supabaseAuthService,
@@ -52,6 +55,9 @@ func NewAuthService(
 		klinikMigrationService:    klinikMigrationService,
 		klinikPasswordRecoveryRedirectURL: strings.TrimSpace(
 			klinikPasswordRecoveryRedirectURL,
+		),
+		silapetPasswordRecoveryRedirectURL: strings.TrimSpace(
+			silapetPasswordRecoveryRedirectURL,
 		),
 	}
 }
@@ -263,32 +269,45 @@ func (s *AuthService) RequestPasswordRecovery(
 		return ErrInvalidRecoveryRequest
 	}
 
-	var redirectURL string
+	var (
+		redirectURL string
+		eligible    bool
+		err         error
+	)
 
 	switch application {
-	case "klinik_pkp":
+	case models.ApplicationCodeKlinikPKP:
 		redirectURL = s.klinikPasswordRecoveryRedirectURL
+		eligible, err = s.isKlinikPasswordRecoveryEligible(
+			ctx,
+			email,
+		)
+
+	case models.ApplicationCodeSilapet:
+		redirectURL = s.silapetPasswordRecoveryRedirectURL
+		eligible, err = s.isSilapetPasswordRecoveryEligible(
+			ctx,
+			email,
+		)
 
 	default:
 		return ErrUnsupportedApplication
 	}
 
+	if err != nil {
+		return err
+	}
+
+	// Keep configuration failures independent of account eligibility so the
+	// public endpoint cannot disclose whether an email has app access.
 	if strings.TrimSpace(redirectURL) == "" {
 		return ErrAuthUnavailable
 	}
 
-	if application == "klinik_pkp" {
-		eligible, err := s.isKlinikPasswordRecoveryEligible(ctx, email)
-		if err != nil {
-			return err
-		}
-
-		if !eligible {
-			// Tetap dianggap berhasil oleh handler untuk mencegah
-			// account/application enumeration, tetapi jangan kirim
-			// recovery email melalui Supabase.
-			return nil
-		}
+	if !eligible {
+		// Deliberately return success to the public handler without asking
+		// Supabase to send recovery email.
+		return nil
 	}
 
 	return s.supabaseAuthService.RequestPasswordRecovery(
@@ -296,6 +315,45 @@ func (s *AuthService) RequestPasswordRecovery(
 		email,
 		redirectURL,
 	)
+}
+func (s *AuthService) isSilapetPasswordRecoveryEligible(
+	ctx context.Context,
+	email string,
+) (bool, error) {
+	if s.userRepository == nil ||
+		s.applicationContextService == nil {
+
+		return false, ErrAuthUnavailable
+	}
+
+	user, err := s.userRepository.GetByEmailIncludingDeleted(
+		ctx,
+		email,
+	)
+	if err != nil {
+		return false, err
+	}
+
+	if user == nil || user.DeletedAt != nil {
+		return false, nil
+	}
+
+	appContext, err := s.applicationContextService.GetByAppUserID(
+		ctx,
+		user.ID,
+		models.ApplicationCodeSilapet,
+	)
+	if err != nil {
+		if errors.Is(err, ErrApplicationUnavailable) ||
+			errors.Is(err, ErrApplicationMembershipUnavailable) {
+
+			return false, nil
+		}
+
+		return false, err
+	}
+
+	return appContext.Status == models.MembershipStatusApproved, nil
 }
 
 func (s *AuthService) isKlinikPasswordRecoveryEligible(
@@ -347,6 +405,68 @@ func (s *AuthService) isKlinikPasswordRecoveryEligible(
 	}
 
 	return true, nil
+}
+
+// ChangePassword changes the password of the authenticated Akun Balai.
+//
+// The current password is independently verified first. The verification
+// session is discarded and the caller's existing bearer token performs the
+// actual password update.
+func (s *AuthService) ChangePassword(
+	ctx context.Context,
+	accessToken string,
+	email string,
+	oldPassword string,
+	newPassword string,
+) error {
+	accessToken = strings.TrimSpace(accessToken)
+	email = strings.TrimSpace(email)
+
+	if accessToken == "" {
+		return ErrInvalidToken
+	}
+
+	if email == "" || oldPassword == "" {
+		return ErrInvalidCurrentPassword
+	}
+
+	if len(newPassword) < 8 ||
+		len(newPassword) > 128 ||
+		strings.TrimSpace(newPassword) == "" {
+
+		return ErrInvalidPassword
+	}
+
+	verificationSession, err :=
+		s.supabaseAuthService.SignInWithPassword(
+			ctx,
+			email,
+			oldPassword,
+		)
+	if err != nil {
+		if errors.Is(err, ErrInvalidCredentials) {
+			return ErrInvalidCurrentPassword
+		}
+
+		return err
+	}
+
+	// Password verification creates its own Supabase session. It is not
+	// returned to the application, so revoke it best-effort.
+	if verificationSession != nil &&
+		strings.TrimSpace(verificationSession.AccessToken) != "" {
+
+		_ = s.supabaseAuthService.SignOut(
+			ctx,
+			verificationSession.AccessToken,
+		)
+	}
+
+	return s.supabaseAuthService.UpdatePassword(
+		ctx,
+		accessToken,
+		newPassword,
+	)
 }
 
 func (s *AuthService) ResetPassword(

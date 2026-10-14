@@ -88,6 +88,7 @@ func main() {
 		applicationContextService,
 		klinikMigrationService,
 		cfg.KlinikPasswordRecoveryRedirectURL,
+		cfg.SilapetPasswordRecoveryRedirectURL,
 	)
 
 	authHandler := handlers.NewAuthHandler(
