@@ -52,7 +52,8 @@ type forgotPasswordRequest struct {
 }
 
 type resetPasswordRequest struct {
-	Password string `json:"password"`
+	TokenHash string `json:"tokenHash"`
+	Password  string `json:"password"`
 }
 
 type changePasswordRequest struct {
@@ -264,33 +265,21 @@ func (h *AuthHandler) ForgotPassword(c *fiber.Ctx) error {
 }
 
 func (h *AuthHandler) ResetPassword(c *fiber.Ctx) error {
-	header := strings.TrimSpace(c.Get(fiber.HeaderAuthorization))
-
-	if header == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error":   "missing_token",
-			"message": "Recovery access token diperlukan.",
-		})
-	}
-
-	parts := strings.Fields(header)
-
-	if len(parts) != 2 ||
-		!strings.EqualFold(parts[0], "Bearer") ||
-		strings.TrimSpace(parts[1]) == "" {
-
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error":   "invalid_token",
-			"message": "Format recovery access token tidak valid.",
-		})
-	}
-
 	var request resetPasswordRequest
 
 	if err := c.BodyParser(&request); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":   "invalid_request",
 			"message": "Request body tidak valid.",
+		})
+	}
+
+	request.TokenHash = strings.TrimSpace(request.TokenHash)
+
+	if request.TokenHash == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error":   "invalid_recovery_token",
+			"message": "Sesi reset password tidak valid atau sudah kedaluwarsa.",
 		})
 	}
 
@@ -303,7 +292,7 @@ func (h *AuthHandler) ResetPassword(c *fiber.Ctx) error {
 
 	if err := h.authService.ResetPassword(
 		c.UserContext(),
-		parts[1],
+		request.TokenHash,
 		request.Password,
 	); err != nil {
 		return handleResetPasswordError(c, err)

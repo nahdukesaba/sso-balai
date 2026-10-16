@@ -42,6 +42,11 @@ type passwordRecoveryRequest struct {
 	Email string `json:"email"`
 }
 
+type passwordRecoveryVerificationRequest struct {
+	Type      string `json:"type"`
+	TokenHash string `json:"token_hash"`
+}
+
 type updatePasswordRequest struct {
 	Password string `json:"password"`
 }
@@ -238,6 +243,91 @@ func (s *SupabaseAuthService) RequestPasswordRecovery(
 			resp.StatusCode,
 		)
 	}
+}
+
+func (s *SupabaseAuthService) VerifyPasswordRecoveryToken(
+	ctx context.Context,
+	tokenHash string,
+) (*models.SupabaseSession, error) {
+	tokenHash = strings.TrimSpace(tokenHash)
+
+	if tokenHash == "" {
+		return nil, ErrInvalidToken
+	}
+
+	payload := passwordRecoveryVerificationRequest{
+		Type:      "recovery",
+		TokenHash: tokenHash,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal password recovery verification: %w", err)
+	}
+
+	endpoint := s.baseURL + "/auth/v1/verify"
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		endpoint,
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create password recovery verification request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("apikey", s.apiKey)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrAuthUnavailable, err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// Continue decoding the verified recovery session.
+
+	case http.StatusBadRequest,
+		http.StatusUnauthorized,
+		http.StatusForbidden,
+		http.StatusUnprocessableEntity:
+		return nil, ErrInvalidToken
+
+	case http.StatusTooManyRequests:
+		return nil, ErrAuthRateLimited
+
+	default:
+		return nil, fmt.Errorf(
+			"%w: recovery verification upstream returned status %d",
+			ErrAuthUnavailable,
+			resp.StatusCode,
+		)
+	}
+
+	var tokenResponse supabaseTokenResponse
+
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResponse); err != nil {
+		return nil, fmt.Errorf("decode password recovery verification: %w", err)
+	}
+
+	if tokenResponse.AccessToken == "" || tokenResponse.User.ID == "" {
+		return nil, ErrInvalidToken
+	}
+
+	return &models.SupabaseSession{
+		AccessToken:  tokenResponse.AccessToken,
+		TokenType:    tokenResponse.TokenType,
+		ExpiresIn:    tokenResponse.ExpiresIn,
+		ExpiresAt:    tokenResponse.ExpiresAt,
+		RefreshToken: tokenResponse.RefreshToken,
+		User: models.SupabaseAuthUser{
+			ID:    tokenResponse.User.ID,
+			Email: tokenResponse.User.Email,
+		},
+	}, nil
 }
 
 func (s *SupabaseAuthService) RefreshSession(

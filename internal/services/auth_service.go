@@ -471,12 +471,12 @@ func (s *AuthService) ChangePassword(
 
 func (s *AuthService) ResetPassword(
 	ctx context.Context,
-	accessToken string,
+	tokenHash string,
 	password string,
 ) error {
-	accessToken = strings.TrimSpace(accessToken)
+	tokenHash = strings.TrimSpace(tokenHash)
 
-	if accessToken == "" {
+	if tokenHash == "" {
 		return ErrInvalidToken
 	}
 
@@ -487,11 +487,51 @@ func (s *AuthService) ResetPassword(
 		return ErrInvalidPassword
 	}
 
-	return s.supabaseAuthService.UpdatePassword(
+	recoverySession, err :=
+		s.supabaseAuthService.VerifyPasswordRecoveryToken(
+			ctx,
+			tokenHash,
+		)
+	if err != nil {
+		return err
+	}
+
+	if recoverySession == nil ||
+		strings.TrimSpace(recoverySession.AccessToken) == "" ||
+		strings.TrimSpace(recoverySession.User.ID) == "" {
+
+		return ErrInvalidToken
+	}
+
+	// A valid Supabase recovery identity must still belong to an available
+	// central Akun Balai identity.
+	if _, err := s.loadCentralIdentity(
 		ctx,
-		accessToken,
+		recoverySession.User.ID,
+	); err != nil {
+		if errors.Is(err, ErrAccountUnavailable) {
+			return ErrInvalidToken
+		}
+
+		return err
+	}
+
+	if err := s.supabaseAuthService.UpdatePassword(
+		ctx,
+		recoverySession.AccessToken,
 		password,
+	); err != nil {
+		return err
+	}
+
+	// The recovery access token never leaves Central SSO. Revoke the
+	// recovery session best-effort after a successful password update.
+	_ = s.supabaseAuthService.SignOut(
+		ctx,
+		recoverySession.AccessToken,
 	)
+
+	return nil
 }
 
 func (s *AuthService) Refresh(
