@@ -31,8 +31,9 @@ func NewAuthHandler(
 }
 
 type loginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	Application string `json:"application"`
 }
 
 type registerRequest struct {
@@ -106,11 +107,17 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	}
 
 	request.Email = strings.TrimSpace(request.Email)
+	request.Application = strings.ToLower(
+		strings.TrimSpace(request.Application),
+	)
 
-	if request.Email == "" || request.Password == "" {
+	if request.Email == "" ||
+		request.Password == "" ||
+		request.Application == "" {
+
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":   "validation_error",
-			"message": "Email dan password wajib diisi.",
+			"message": "Email, password, dan aplikasi wajib diisi.",
 		})
 	}
 
@@ -118,6 +125,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		c.UserContext(),
 		request.Email,
 		request.Password,
+		request.Application,
 	)
 
 	if err != nil {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -33,6 +34,8 @@ func main() {
 	klinikUserRepository := repository.NewKlinikUserRepository(db)
 	applicationRepository := repository.NewApplicationRepository(db)
 	membershipRepository := repository.NewMembershipRepository(db)
+	credentialRepository := repository.NewCredentialRepository(db)
+	sessionRepository := repository.NewSessionRepository(db)
 
 	identityService := services.NewIdentityService(
 		userRepository,
@@ -48,6 +51,34 @@ func main() {
 		membershipRepository,
 	)
 
+	credentialService := services.NewCredentialService(
+		credentialRepository,
+	)
+
+	accessTokenService, err := services.NewAccessTokenService(
+		cfg.AuthAccessTokenSecret,
+		"sso-balai",
+		15*time.Minute,
+	)
+	if err != nil {
+		log.Fatalf(
+			"failed to initialize central access token service: %v",
+			err,
+		)
+	}
+
+	sessionService, err := services.NewSessionService(
+		sessionRepository,
+		accessTokenService,
+		7*24*time.Hour,
+	)
+	if err != nil {
+		log.Fatalf(
+			"failed to initialize central session service: %v",
+			err,
+		)
+	}
+
 	supabaseAuthService, err := services.NewSupabaseAuthService(
 		cfg.SupabaseURL,
 		cfg.SupabasePublicKey,
@@ -55,6 +86,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to initialize Supabase authentication: %v", err)
 	}
+
+	centralLoginService := services.NewCentralLoginService(
+		userRepository,
+		credentialService,
+		applicationContextService,
+		sessionService,
+		identityService,
+		supabaseAuthService,
+	)
 
 	supabaseAdminService, err := services.NewSupabaseAdminService(
 		cfg.SupabaseURL,
@@ -89,6 +129,10 @@ func main() {
 		klinikMigrationService,
 		cfg.KlinikPasswordRecoveryRedirectURL,
 		cfg.SilapetPasswordRecoveryRedirectURL,
+	)
+
+	authService.SetCentralLoginService(
+		centralLoginService,
 	)
 
 	authHandler := handlers.NewAuthHandler(

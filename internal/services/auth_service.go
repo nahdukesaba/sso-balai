@@ -30,6 +30,7 @@ type AuthService struct {
 	klinikContextService               *KlinikContextService
 	applicationContextService          *ApplicationContextService
 	klinikMigrationService             *KlinikMigrationService
+	centralLoginService                *CentralLoginService
 	klinikPasswordRecoveryRedirectURL  string
 	silapetPasswordRecoveryRedirectURL string
 }
@@ -60,6 +61,12 @@ func NewAuthService(
 			silapetPasswordRecoveryRedirectURL,
 		),
 	}
+}
+
+func (s *AuthService) SetCentralLoginService(
+	service *CentralLoginService,
+) {
+	s.centralLoginService = service
 }
 
 // RegisterCentralIdentity creates an Akun Balai only.
@@ -199,62 +206,18 @@ func (s *AuthService) Login(
 	ctx context.Context,
 	email string,
 	password string,
+	application string,
 ) (*models.LoginResult, error) {
-	email = strings.TrimSpace(email)
+	if s.centralLoginService == nil {
+		return nil, ErrAuthUnavailable
+	}
 
-	session, err := s.supabaseAuthService.SignInWithPassword(
+	return s.centralLoginService.Login(
 		ctx,
 		email,
 		password,
+		application,
 	)
-
-	if err != nil {
-		// Fallback Klinik hanya boleh dijalankan apabila Supabase
-		// benar-benar menolak credential, bukan ketika Supabase
-		// sedang unavailable atau rate-limited.
-		if !errors.Is(err, ErrInvalidCredentials) {
-			return nil, err
-		}
-
-		// First-login migration Klinik cukup menggunakan email dan password.
-		// NIP bukan credential login dan akan diambil dari database Klinik.
-		if s.klinikMigrationService == nil {
-			return nil, ErrInvalidCredentials
-		}
-
-		_, migrationErr := s.klinikMigrationService.Migrate(
-			ctx,
-			email,
-			password,
-		)
-		if migrationErr != nil {
-			return nil, migrationErr
-		}
-
-		// Migration berhasil. Login ulang melalui Supabase supaya
-		// token yang dikembalikan tetap token resmi SSO/Supabase.
-		session, err = s.supabaseAuthService.SignInWithPassword(
-			ctx,
-			email,
-			password,
-		)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	identity, err := s.loadCentralIdentity(
-		ctx,
-		session.User.ID,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return &models.LoginResult{
-		Session:  session,
-		Identity: identity,
-	}, nil
 }
 
 func (s *AuthService) RequestPasswordRecovery(

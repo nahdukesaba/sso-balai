@@ -8,9 +8,10 @@ import (
 )
 
 type Config struct {
-	AppHost     string
-	AppPort     string
-	DatabaseURL string
+	AppHost               string
+	AppPort               string
+	DatabaseURL           string
+	AuthAccessTokenSecret string
 
 	SupabaseURL       string
 	SupabasePublicKey string
@@ -29,9 +30,10 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		AppHost:     getEnv("APP_HOST", "127.0.0.1"),
-		AppPort:     getEnv("APP_PORT", "8080"),
-		DatabaseURL: os.Getenv("DATABASE_URL"),
+		AppHost:               getEnv("APP_HOST", "127.0.0.1"),
+		AppPort:               getEnv("APP_PORT", "8080"),
+		DatabaseURL:           os.Getenv("DATABASE_URL"),
+		AuthAccessTokenSecret: os.Getenv("AUTH_ACCESS_TOKEN_SECRET"),
 
 		SupabaseURL: os.Getenv("SUPABASE_URL"),
 
