@@ -22,6 +22,7 @@ type AppMembership struct {
 
 type ApplicationContext struct {
 	UserID          string `json:"userId"`
+	ApplicationID   string `json:"-"`
 	Application     string `json:"application"`
 	ApplicationName string `json:"applicationName"`
 	Role            string `json:"role"`

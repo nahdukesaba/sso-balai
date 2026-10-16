@@ -75,6 +75,7 @@ func (s *ApplicationContextService) GetByAppUserID(
 
 	return &models.ApplicationContext{
 		UserID:          appUserID,
+		ApplicationID:   application.ID,
 		Application:     application.Code,
 		ApplicationName: application.Name,
 		Role:            membership.Role,
