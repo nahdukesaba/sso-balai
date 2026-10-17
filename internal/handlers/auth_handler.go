@@ -54,6 +54,7 @@ type forgotPasswordRequest struct {
 }
 
 type resetPasswordRequest struct {
+	Token     string `json:"token"`
 	TokenHash string `json:"tokenHash"`
 	Password  string `json:"password"`
 }
@@ -246,32 +247,46 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	})
 }
 
-func (h *AuthHandler) ForgotPassword(c *fiber.Ctx) error {
+func (h *AuthHandler) ForgotPassword(
+	c *fiber.Ctx,
+) error {
 	var request forgotPasswordRequest
 
 	if err := c.BodyParser(&request); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+		return c.Status(
+			fiber.StatusBadRequest,
+		).JSON(fiber.Map{
 			"error":   "invalid_request",
-			"message": "Request body tidak valid.",
+			"message": "Payload permintaan tidak valid.",
 		})
 	}
 
-	request.Email = strings.TrimSpace(request.Email)
-	request.Application = strings.TrimSpace(request.Application)
+	request.Email = strings.TrimSpace(
+		request.Email,
+	)
 
-	if request.Email == "" || request.Application == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+	if request.Email == "" {
+		return c.Status(
+			fiber.StatusBadRequest,
+		).JSON(fiber.Map{
 			"error":   "validation_error",
-			"message": "Email dan aplikasi wajib diisi.",
+			"message": "Email wajib diisi.",
 		})
 	}
 
-	parsedEmail, err := mail.ParseAddress(request.Email)
+	parsedEmail, err := mail.ParseAddress(
+		request.Email,
+	)
 	if err != nil ||
 		parsedEmail.Address == "" ||
-		!strings.EqualFold(parsedEmail.Address, request.Email) {
+		!strings.EqualFold(
+			parsedEmail.Address,
+			request.Email,
+		) {
 
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+		return c.Status(
+			fiber.StatusBadRequest,
+		).JSON(fiber.Map{
 			"error":   "validation_error",
 			"message": "Format email tidak valid.",
 		})
@@ -280,51 +295,73 @@ func (h *AuthHandler) ForgotPassword(c *fiber.Ctx) error {
 	if err := h.authService.RequestPasswordRecovery(
 		c.UserContext(),
 		request.Email,
-		request.Application,
 	); err != nil {
-		return handlePasswordRecoveryError(c, err)
+		return handlePasswordRecoveryError(
+			c,
+			err,
+		)
 	}
 
-	return c.Status(fiber.StatusAccepted).JSON(fiber.Map{
+	return c.Status(
+		fiber.StatusOK,
+	).JSON(fiber.Map{
 		"message": "Jika email terdaftar, instruksi reset password akan dikirim.",
 	})
 }
 
-func (h *AuthHandler) ResetPassword(c *fiber.Ctx) error {
+func (h *AuthHandler) ResetPassword(
+	c *fiber.Ctx,
+) error {
 	var request resetPasswordRequest
 
 	if err := c.BodyParser(&request); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+		return c.Status(
+			fiber.StatusBadRequest,
+		).JSON(fiber.Map{
 			"error":   "invalid_request",
-			"message": "Request body tidak valid.",
+			"message": "Payload permintaan tidak valid.",
 		})
 	}
 
-	request.TokenHash = strings.TrimSpace(request.TokenHash)
+	request.Token = strings.TrimSpace(
+		request.Token,
+	)
+	request.TokenHash = strings.TrimSpace(
+		request.TokenHash,
+	)
 
-	if request.TokenHash == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+	// tokenHash remains accepted temporarily so existing clients do
+	// not break. In the self-hosted flow its value is treated as the
+	// raw opaque central recovery token, not a Supabase token hash.
+	if request.Token == "" {
+		request.Token = request.TokenHash
+	}
+
+	if request.Token == "" {
+		return c.Status(
+			fiber.StatusBadRequest,
+		).JSON(fiber.Map{
 			"error":   "invalid_recovery_token",
 			"message": "Sesi reset password tidak valid atau sudah kedaluwarsa.",
 		})
 	}
 
-	if len(request.Password) < 8 || len(request.Password) > 128 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":   "invalid_password",
-			"message": "Password harus terdiri dari 8 sampai 128 karakter.",
-		})
-	}
-
 	if err := h.authService.ResetPassword(
 		c.UserContext(),
-		request.TokenHash,
+		request.Token,
 		request.Password,
 	); err != nil {
-		return handleResetPasswordError(c, err)
+		return handleResetPasswordError(
+			c,
+			err,
+		)
 	}
 
-	return c.SendStatus(fiber.StatusNoContent)
+	return c.Status(
+		fiber.StatusOK,
+	).JSON(fiber.Map{
+		"message": "Password berhasil diperbarui. Silakan masuk kembali.",
+	})
 }
 
 func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {

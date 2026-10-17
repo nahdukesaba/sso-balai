@@ -271,3 +271,35 @@ func (r *SessionRepository) RevokeByID(
 
 	return nil
 }
+
+func (r *SessionRepository) RevokeAllByAppUserID(
+	ctx context.Context,
+	appUserID string,
+) error {
+	appUserID = strings.TrimSpace(appUserID)
+
+	if appUserID == "" {
+		return nil
+	}
+
+	_, err := r.pool.Exec(
+		ctx,
+		`
+		UPDATE public.auth_sessions
+		SET
+			revoked_at = COALESCE(revoked_at, NOW()),
+			updated_at = NOW()
+		WHERE app_user_id = $1
+		  AND revoked_at IS NULL
+		`,
+		appUserID,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"revoke central sessions by user: %w",
+			err,
+		)
+	}
+
+	return nil
+}

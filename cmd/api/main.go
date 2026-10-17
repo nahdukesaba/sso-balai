@@ -39,6 +39,9 @@ func main() {
 	centralRegistrationRepository :=
 		repository.NewCentralRegistrationRepository(db)
 
+	passwordResetRepository :=
+		repository.NewPasswordResetRepository(db)
+
 	identityService := services.NewIdentityService(
 		userRepository,
 		pegawaiRepository,
@@ -135,6 +138,34 @@ func main() {
 			supabaseAuthService,
 		)
 
+	resendRecoveryMailer, err :=
+		services.NewResendRecoveryMailer(
+			cfg.ResendAPIKey,
+			cfg.ResendFromEmail,
+			cfg.ResendFromName,
+		)
+	if err != nil {
+		log.Fatalf(
+			"failed to initialize recovery mailer: %v",
+			err,
+		)
+	}
+
+	centralPasswordRecoveryService, err :=
+		services.NewCentralPasswordRecoveryService(
+			passwordResetRepository,
+			credentialService,
+			sessionRepository,
+			resendRecoveryMailer,
+			cfg.SSOPublicURL,
+		)
+	if err != nil {
+		log.Fatalf(
+			"failed to initialize central password recovery: %v",
+			err,
+		)
+	}
+
 	authService := services.NewAuthService(
 		supabaseAuthService,
 		supabaseAdminService,
@@ -161,6 +192,10 @@ func main() {
 
 	authService.SetCentralPasswordChangeService(
 		centralPasswordChangeService,
+	)
+
+	authService.SetCentralPasswordRecoveryService(
+		centralPasswordRecoveryService,
 	)
 
 	authHandler := handlers.NewAuthHandler(

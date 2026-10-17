@@ -12,6 +12,10 @@ type Config struct {
 	AppPort               string
 	DatabaseURL           string
 	AuthAccessTokenSecret string
+	SSOPublicURL          string
+	ResendAPIKey          string
+	ResendFromEmail       string
+	ResendFromName        string
 
 	SupabaseURL       string
 	SupabasePublicKey string
@@ -34,6 +38,10 @@ func Load() (*Config, error) {
 		AppPort:               getEnv("APP_PORT", "8080"),
 		DatabaseURL:           os.Getenv("DATABASE_URL"),
 		AuthAccessTokenSecret: os.Getenv("AUTH_ACCESS_TOKEN_SECRET"),
+		SSOPublicURL:          os.Getenv("SSO_PUBLIC_URL"),
+		ResendAPIKey:          os.Getenv("RESEND_API_KEY"),
+		ResendFromEmail:       os.Getenv("RESEND_FROM_EMAIL"),
+		ResendFromName:        os.Getenv("RESEND_FROM_NAME"),
 
 		SupabaseURL: os.Getenv("SUPABASE_URL"),
 

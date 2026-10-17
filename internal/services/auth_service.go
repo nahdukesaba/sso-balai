@@ -32,6 +32,7 @@ type AuthService struct {
 	centralRegistrationService         *CentralRegistrationService
 	centralSessionService              *SessionService
 	centralPasswordChangeService       *CentralPasswordChangeService
+	centralPasswordRecoveryService     *CentralPasswordRecoveryService
 	klinikPasswordRecoveryRedirectURL  string
 	silapetPasswordRecoveryRedirectURL string
 }
@@ -88,6 +89,12 @@ func (s *AuthService) SetCentralPasswordChangeService(
 	s.centralPasswordChangeService = service
 }
 
+func (s *AuthService) SetCentralPasswordRecoveryService(
+	service *CentralPasswordRecoveryService,
+) {
+	s.centralPasswordRecoveryService = service
+}
+
 // RegisterCentralIdentity creates a central self-hosted identity
 // together with its initial application membership.
 //
@@ -136,62 +143,17 @@ func (s *AuthService) Login(
 func (s *AuthService) RequestPasswordRecovery(
 	ctx context.Context,
 	email string,
-	application string,
 ) error {
-	email = strings.TrimSpace(email)
-	application = strings.TrimSpace(application)
-
-	if email == "" {
-		return ErrInvalidRecoveryRequest
-	}
-
-	var (
-		redirectURL string
-		eligible    bool
-		err         error
-	)
-
-	switch application {
-	case models.ApplicationCodeKlinikPKP:
-		redirectURL = s.klinikPasswordRecoveryRedirectURL
-		eligible, err = s.isKlinikPasswordRecoveryEligible(
-			ctx,
-			email,
-		)
-
-	case models.ApplicationCodeSilapet:
-		redirectURL = s.silapetPasswordRecoveryRedirectURL
-		eligible, err = s.isSilapetPasswordRecoveryEligible(
-			ctx,
-			email,
-		)
-
-	default:
-		return ErrUnsupportedApplication
-	}
-
-	if err != nil {
-		return err
-	}
-
-	// Keep configuration failures independent of account eligibility so the
-	// public endpoint cannot disclose whether an email has app access.
-	if strings.TrimSpace(redirectURL) == "" {
+	if s.centralPasswordRecoveryService == nil {
 		return ErrAuthUnavailable
 	}
 
-	if !eligible {
-		// Deliberately return success to the public handler without asking
-		// Supabase to send recovery email.
-		return nil
-	}
-
-	return s.supabaseAuthService.RequestPasswordRecovery(
+	return s.centralPasswordRecoveryService.Request(
 		ctx,
 		email,
-		redirectURL,
 	)
 }
+
 func (s *AuthService) isSilapetPasswordRecoveryEligible(
 	ctx context.Context,
 	email string,
@@ -309,67 +271,18 @@ func (s *AuthService) ChangePassword(
 
 func (s *AuthService) ResetPassword(
 	ctx context.Context,
-	tokenHash string,
+	token string,
 	password string,
 ) error {
-	tokenHash = strings.TrimSpace(tokenHash)
-
-	if tokenHash == "" {
-		return ErrInvalidToken
+	if s.centralPasswordRecoveryService == nil {
+		return ErrAuthUnavailable
 	}
 
-	if len(password) < 8 ||
-		len(password) > 128 ||
-		strings.TrimSpace(password) == "" {
-
-		return ErrInvalidPassword
-	}
-
-	recoverySession, err :=
-		s.supabaseAuthService.VerifyPasswordRecoveryToken(
-			ctx,
-			tokenHash,
-		)
-	if err != nil {
-		return err
-	}
-
-	if recoverySession == nil ||
-		strings.TrimSpace(recoverySession.AccessToken) == "" ||
-		strings.TrimSpace(recoverySession.User.ID) == "" {
-
-		return ErrInvalidToken
-	}
-
-	// A valid Supabase recovery identity must still belong to an available
-	// central Akun Balai identity.
-	if _, err := s.loadCentralIdentity(
+	return s.centralPasswordRecoveryService.Reset(
 		ctx,
-		recoverySession.User.ID,
-	); err != nil {
-		if errors.Is(err, ErrAccountUnavailable) {
-			return ErrInvalidToken
-		}
-
-		return err
-	}
-
-	if err := s.supabaseAuthService.UpdatePassword(
-		ctx,
-		recoverySession.AccessToken,
+		token,
 		password,
-	); err != nil {
-		return err
-	}
-
-	// The recovery access token never leaves Central SSO. Revoke the
-	// recovery session best-effort after a successful password update.
-	_ = s.supabaseAuthService.SignOut(
-		ctx,
-		recoverySession.AccessToken,
 	)
-
-	return nil
 }
 
 func (s *AuthService) Refresh(
