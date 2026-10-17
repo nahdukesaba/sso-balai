@@ -37,10 +37,11 @@ type loginRequest struct {
 }
 
 type registerRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	FullName string `json:"fullName"`
-	Phone    string `json:"phone"`
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	FullName    string `json:"fullName"`
+	Phone       string `json:"phone"`
+	Application string `json:"application"`
 }
 
 type refreshRequest struct {
@@ -155,14 +156,18 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	request.Email = strings.TrimSpace(request.Email)
 	request.FullName = strings.TrimSpace(request.FullName)
 	request.Phone = strings.TrimSpace(request.Phone)
+	request.Application = strings.ToLower(
+		strings.TrimSpace(request.Application),
+	)
 
 	if request.Email == "" ||
 		request.Password == "" ||
-		request.FullName == "" {
+		request.FullName == "" ||
+		request.Application == "" {
 
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":   "validation_error",
-			"message": "Email, password, dan nama lengkap wajib diisi.",
+			"message": "Email, password, nama lengkap, dan aplikasi wajib diisi.",
 		})
 	}
 
@@ -192,6 +197,7 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 		request.Password,
 		request.FullName,
 		request.Phone,
+		request.Application,
 	)
 	if err != nil {
 		switch {
@@ -205,6 +211,18 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 				"error":   "identity_conflict",
 				"message": "Identitas akun tidak dapat dibuat secara otomatis.",
+			})
+
+		case errors.Is(err, services.ErrInvalidRegistrationRequest):
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error":   "validation_error",
+				"message": "Data registrasi tidak valid.",
+			})
+
+		case errors.Is(err, services.ErrUnsupportedApplication):
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error":   "unsupported_application",
+				"message": "Aplikasi tidak didukung atau sedang tidak aktif.",
 			})
 
 		case errors.Is(err, services.ErrAdminUnavailable),

@@ -36,6 +36,8 @@ func main() {
 	membershipRepository := repository.NewMembershipRepository(db)
 	credentialRepository := repository.NewCredentialRepository(db)
 	sessionRepository := repository.NewSessionRepository(db)
+	centralRegistrationRepository :=
+		repository.NewCentralRegistrationRepository(db)
 
 	identityService := services.NewIdentityService(
 		userRepository,
@@ -54,6 +56,14 @@ func main() {
 	credentialService := services.NewCredentialService(
 		credentialRepository,
 	)
+
+	centralRegistrationService :=
+		services.NewCentralRegistrationService(
+			userRepository,
+			applicationRepository,
+			credentialService,
+			centralRegistrationRepository,
+		)
 
 	accessTokenService, err := services.NewAccessTokenService(
 		cfg.AuthAccessTokenSecret,
@@ -133,6 +143,10 @@ func main() {
 
 	authService.SetCentralLoginService(
 		centralLoginService,
+	)
+
+	authService.SetCentralRegistrationService(
+		centralRegistrationService,
 	)
 
 	authHandler := handlers.NewAuthHandler(
