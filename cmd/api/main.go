@@ -129,6 +129,12 @@ func main() {
 		klinikUserRepository,
 	)
 
+	centralPasswordChangeService :=
+		services.NewCentralPasswordChangeService(
+			credentialService,
+			supabaseAuthService,
+		)
+
 	authService := services.NewAuthService(
 		supabaseAuthService,
 		supabaseAdminService,
@@ -151,6 +157,10 @@ func main() {
 
 	authService.SetCentralSessionService(
 		sessionService,
+	)
+
+	authService.SetCentralPasswordChangeService(
+		centralPasswordChangeService,
 	)
 
 	authHandler := handlers.NewAuthHandler(

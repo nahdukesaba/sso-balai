@@ -31,6 +31,7 @@ type AuthService struct {
 	centralLoginService                *CentralLoginService
 	centralRegistrationService         *CentralRegistrationService
 	centralSessionService              *SessionService
+	centralPasswordChangeService       *CentralPasswordChangeService
 	klinikPasswordRecoveryRedirectURL  string
 	silapetPasswordRecoveryRedirectURL string
 }
@@ -79,6 +80,12 @@ func (s *AuthService) SetCentralSessionService(
 	service *SessionService,
 ) {
 	s.centralSessionService = service
+}
+
+func (s *AuthService) SetCentralPasswordChangeService(
+	service *CentralPasswordChangeService,
+) {
+	s.centralPasswordChangeService = service
 }
 
 // RegisterCentralIdentity creates a central self-hosted identity
@@ -276,64 +283,26 @@ func (s *AuthService) isKlinikPasswordRecoveryEligible(
 	return true, nil
 }
 
-// ChangePassword changes the password of the authenticated Akun Balai.
+// ChangePassword changes the authenticated user's central credential.
 //
-// The current password is independently verified first. The verification
-// session is discarded and the caller's existing bearer token performs the
-// actual password update.
+// Authorization has already been established by RequireAuth. Password
+// verification and the resulting credential update are owned by Central SSO.
 func (s *AuthService) ChangePassword(
 	ctx context.Context,
-	accessToken string,
+	appUserID string,
 	email string,
 	oldPassword string,
 	newPassword string,
 ) error {
-	accessToken = strings.TrimSpace(accessToken)
-	email = strings.TrimSpace(email)
-
-	if accessToken == "" {
-		return ErrInvalidToken
+	if s.centralPasswordChangeService == nil {
+		return ErrAuthUnavailable
 	}
 
-	if email == "" || oldPassword == "" {
-		return ErrInvalidCurrentPassword
-	}
-
-	if len(newPassword) < 8 ||
-		len(newPassword) > 128 ||
-		strings.TrimSpace(newPassword) == "" {
-
-		return ErrInvalidPassword
-	}
-
-	verificationSession, err :=
-		s.supabaseAuthService.SignInWithPassword(
-			ctx,
-			email,
-			oldPassword,
-		)
-	if err != nil {
-		if errors.Is(err, ErrInvalidCredentials) {
-			return ErrInvalidCurrentPassword
-		}
-
-		return err
-	}
-
-	// Password verification creates its own Supabase session. It is not
-	// returned to the application, so revoke it best-effort.
-	if verificationSession != nil &&
-		strings.TrimSpace(verificationSession.AccessToken) != "" {
-
-		_ = s.supabaseAuthService.SignOut(
-			ctx,
-			verificationSession.AccessToken,
-		)
-	}
-
-	return s.supabaseAuthService.UpdatePassword(
+	return s.centralPasswordChangeService.Change(
 		ctx,
-		accessToken,
+		appUserID,
+		email,
+		oldPassword,
 		newPassword,
 	)
 }

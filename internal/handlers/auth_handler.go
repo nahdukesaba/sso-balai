@@ -368,24 +368,9 @@ func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
 		})
 	}
 
-	header := strings.TrimSpace(
-		c.Get(fiber.HeaderAuthorization),
-	)
-	parts := strings.Fields(header)
-
-	if len(parts) != 2 ||
-		!strings.EqualFold(parts[0], "Bearer") ||
-		strings.TrimSpace(parts[1]) == "" {
-
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error":   "invalid_token",
-			"message": "Format access token tidak valid.",
-		})
-	}
-
 	if err := h.authService.ChangePassword(
 		c.UserContext(),
-		parts[1],
+		identity.User.ID,
 		identity.User.Email,
 		request.OldPassword,
 		request.NewPassword,
