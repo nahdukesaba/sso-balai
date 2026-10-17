@@ -42,18 +42,28 @@ type CentralPasswordLegacyVerifier interface {
 	) error
 }
 
+type CentralPasswordChangeSessionRevoker interface {
+	RevokeAllByAppUserID(
+		ctx context.Context,
+		appUserID string,
+	) error
+}
+
 type CentralPasswordChangeService struct {
 	credentials CentralPasswordCredentialService
 	legacy      CentralPasswordLegacyVerifier
+	sessions    CentralPasswordChangeSessionRevoker
 }
 
 func NewCentralPasswordChangeService(
 	credentials CentralPasswordCredentialService,
 	legacy CentralPasswordLegacyVerifier,
+	sessions CentralPasswordChangeSessionRevoker,
 ) *CentralPasswordChangeService {
 	return &CentralPasswordChangeService{
 		credentials: credentials,
 		legacy:      legacy,
+		sessions:    sessions,
 	}
 }
 
@@ -75,7 +85,9 @@ func (s *CentralPasswordChangeService) Change(
 		return err
 	}
 
-	if s.credentials == nil {
+	if s.credentials == nil ||
+		s.sessions == nil {
+
 		return ErrAuthUnavailable
 	}
 
@@ -92,8 +104,14 @@ func (s *CentralPasswordChangeService) Change(
 			appUserID,
 			newPassword,
 		)
+		if err != nil {
+			return err
+		}
 
-		return err
+		return s.sessions.RevokeAllByAppUserID(
+			ctx,
+			appUserID,
+		)
 
 	case errors.Is(err, ErrInvalidCredentials):
 		return ErrInvalidCurrentPassword
@@ -159,6 +177,12 @@ func (s *CentralPasswordChangeService) Change(
 		newPassword,
 		false,
 	)
+	if err != nil {
+		return err
+	}
 
-	return err
+	return s.sessions.RevokeAllByAppUserID(
+		ctx,
+		appUserID,
+	)
 }

@@ -70,6 +70,20 @@ func (f *fakeCentralPasswordCredentials) CreateCredential(
 	}, nil
 }
 
+type fakeCentralPasswordChangeSessions struct {
+	revokedUser string
+	err         error
+}
+
+func (f *fakeCentralPasswordChangeSessions) RevokeAllByAppUserID(
+	ctx context.Context,
+	appUserID string,
+) error {
+	f.revokedUser = appUserID
+
+	return f.err
+}
+
 type fakeCentralPasswordLegacy struct {
 	session *models.SupabaseSession
 	err     error
@@ -101,6 +115,17 @@ func (f *fakeCentralPasswordLegacy) SignOut(
 	return nil
 }
 
+func newTestCentralPasswordChangeService(
+	credentials CentralPasswordCredentialService,
+	legacy CentralPasswordLegacyVerifier,
+) *CentralPasswordChangeService {
+	return NewCentralPasswordChangeService(
+		credentials,
+		legacy,
+		&fakeCentralPasswordChangeSessions{},
+	)
+}
+
 func TestCentralPasswordChangeUsesCentralCredential(
 	t *testing.T,
 ) {
@@ -112,7 +137,7 @@ func TestCentralPasswordChangeUsesCentralCredential(
 
 	legacy := &fakeCentralPasswordLegacy{}
 
-	service := NewCentralPasswordChangeService(
+	service := newTestCentralPasswordChangeService(
 		credentials,
 		legacy,
 	)
@@ -157,7 +182,7 @@ func TestCentralPasswordChangeUsesCentralCredential(
 func TestCentralPasswordChangeRejectsWrongPassword(
 	t *testing.T,
 ) {
-	service := NewCentralPasswordChangeService(
+	service := newTestCentralPasswordChangeService(
 		&fakeCentralPasswordCredentials{
 			verifyErr: ErrInvalidCredentials,
 		},
@@ -200,7 +225,7 @@ func TestCentralPasswordChangeMigratesLegacyCredential(
 		},
 	}
 
-	service := NewCentralPasswordChangeService(
+	service := newTestCentralPasswordChangeService(
 		credentials,
 		legacy,
 	)
@@ -247,7 +272,7 @@ func TestCentralPasswordChangeMigratesLegacyCredential(
 func TestCentralPasswordChangeRejectsLegacyIdentityMismatch(
 	t *testing.T,
 ) {
-	service := NewCentralPasswordChangeService(
+	service := newTestCentralPasswordChangeService(
 		&fakeCentralPasswordCredentials{
 			verifyErr: ErrCredentialNotFound,
 		},
@@ -276,6 +301,45 @@ func TestCentralPasswordChangeRejectsLegacyIdentityMismatch(
 		t.Fatalf(
 			"expected identity mismatch rejection, got %v",
 			err,
+		)
+	}
+}
+
+func TestCentralPasswordChangeRevokesSessions(
+	t *testing.T,
+) {
+	credentials := &fakeCentralPasswordCredentials{
+		verifyCredential: &models.AuthCredential{
+			AppUserID: "user-1",
+		},
+	}
+
+	sessions := &fakeCentralPasswordChangeSessions{}
+
+	service := NewCentralPasswordChangeService(
+		credentials,
+		&fakeCentralPasswordLegacy{},
+		sessions,
+	)
+
+	err := service.Change(
+		context.Background(),
+		"user-1",
+		"user@example.com",
+		"old-password",
+		"new-password",
+	)
+	if err != nil {
+		t.Fatalf(
+			"change password: %v",
+			err,
+		)
+	}
+
+	if sessions.revokedUser != "user-1" {
+		t.Fatalf(
+			"expected all sessions for user-1 to be revoked, got %q",
+			sessions.revokedUser,
 		)
 	}
 }

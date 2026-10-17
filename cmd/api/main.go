@@ -141,6 +141,7 @@ func main() {
 		services.NewCentralPasswordChangeService(
 			credentialService,
 			supabaseAuthService,
+			sessionRepository,
 		)
 
 	resendRecoveryMailer, err :=
