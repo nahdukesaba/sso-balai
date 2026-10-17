@@ -149,6 +149,10 @@ func main() {
 		centralRegistrationService,
 	)
 
+	authService.SetCentralSessionService(
+		sessionService,
+	)
+
 	authHandler := handlers.NewAuthHandler(
 		authService,
 		klinikContextService,

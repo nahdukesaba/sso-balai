@@ -86,7 +86,17 @@ func NewSessionService(
 	}, nil
 }
 
-func generateRefreshToken() (string, error) {
+func generateRefreshToken(
+	applicationCode string,
+) (string, error) {
+	applicationCode = strings.ToLower(
+		strings.TrimSpace(applicationCode),
+	)
+
+	if applicationCode == "" {
+		return "", ErrInvalidRefreshToken
+	}
+
 	raw := make(
 		[]byte,
 		refreshTokenByteLength,
@@ -99,9 +109,37 @@ func generateRefreshToken() (string, error) {
 		)
 	}
 
-	return base64.RawURLEncoding.EncodeToString(
-		raw,
-	), nil
+	return "sso." +
+			applicationCode +
+			"." +
+			base64.RawURLEncoding.EncodeToString(raw),
+		nil
+}
+
+func centralRefreshTokenApplication(
+	rawToken string,
+) (string, bool) {
+	rawToken = strings.TrimSpace(rawToken)
+
+	parts := strings.Split(rawToken, ".")
+
+	if len(parts) != 3 ||
+		parts[0] != "sso" {
+
+		return "", false
+	}
+
+	applicationCode := strings.ToLower(
+		strings.TrimSpace(parts[1]),
+	)
+
+	if applicationCode == "" ||
+		strings.TrimSpace(parts[2]) == "" {
+
+		return "", false
+	}
+
+	return applicationCode, true
 }
 
 func hashRefreshToken(
@@ -140,7 +178,7 @@ func (s *SessionService) Create(
 		return nil, nil, ErrSessionUnavailable
 	}
 
-	refreshToken, err := generateRefreshToken()
+	refreshToken, err := generateRefreshToken(applicationCode)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -265,7 +303,7 @@ func (s *SessionService) Rotate(
 		return nil, nil, ErrInvalidRefreshToken
 	}
 
-	newRefreshToken, err := generateRefreshToken()
+	newRefreshToken, err := generateRefreshToken(applicationCode)
 	if err != nil {
 		return nil, nil, err
 	}
