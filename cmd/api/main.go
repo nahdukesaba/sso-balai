@@ -42,6 +42,11 @@ func main() {
 	passwordResetRepository :=
 		repository.NewPasswordResetRepository(db)
 
+	applicationEnrollmentRepository :=
+		repository.NewApplicationEnrollmentRepository(
+			db,
+		)
+
 	identityService := services.NewIdentityService(
 		userRepository,
 		pegawaiRepository,
@@ -166,6 +171,11 @@ func main() {
 		)
 	}
 
+	applicationEnrollmentService :=
+		services.NewApplicationEnrollmentService(
+			applicationEnrollmentRepository,
+		)
+
 	authService := services.NewAuthService(
 		supabaseAuthService,
 		supabaseAdminService,
@@ -196,6 +206,10 @@ func main() {
 
 	authService.SetCentralPasswordRecoveryService(
 		centralPasswordRecoveryService,
+	)
+
+	authService.SetApplicationEnrollmentService(
+		applicationEnrollmentService,
 	)
 
 	authHandler := handlers.NewAuthHandler(

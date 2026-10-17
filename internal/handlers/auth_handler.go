@@ -59,6 +59,10 @@ type resetPasswordRequest struct {
 	Password  string `json:"password"`
 }
 
+type applicationEnrollmentRequest struct {
+	Application string `json:"application"`
+}
+
 type changePasswordRequest struct {
 	OldPassword string `json:"oldPassword"`
 	NewPassword string `json:"newPassword"`
@@ -416,6 +420,138 @@ func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
 	}
 
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+func (h *AuthHandler) EnrollApplication(
+	c *fiber.Ctx,
+) error {
+	var request applicationEnrollmentRequest
+
+	if err := c.BodyParser(&request); err != nil {
+		return c.Status(
+			fiber.StatusBadRequest,
+		).JSON(fiber.Map{
+			"error":   "invalid_request",
+			"message": "Payload permintaan tidak valid.",
+		})
+	}
+
+	request.Application = strings.ToLower(
+		strings.TrimSpace(
+			request.Application,
+		),
+	)
+
+	if request.Application == "" {
+		return c.Status(
+			fiber.StatusBadRequest,
+		).JSON(fiber.Map{
+			"error":   "validation_error",
+			"message": "Application wajib diisi.",
+		})
+	}
+
+	header := strings.TrimSpace(
+		c.Get(
+			fiber.HeaderAuthorization,
+		),
+	)
+
+	parts := strings.Fields(
+		header,
+	)
+
+	if len(parts) != 2 ||
+		!strings.EqualFold(
+			parts[0],
+			"Bearer",
+		) ||
+		strings.TrimSpace(
+			parts[1],
+		) == "" {
+
+		return c.Status(
+			fiber.StatusUnauthorized,
+		).JSON(fiber.Map{
+			"error":   "invalid_token",
+			"message": "Access token tidak valid.",
+		})
+	}
+
+	status, err :=
+		h.authService.EnrollApplication(
+			c.UserContext(),
+			parts[1],
+			request.Application,
+		)
+	if err != nil {
+		switch {
+		case errors.Is(
+			err,
+			services.ErrInvalidApplicationEnrollment,
+		):
+			return c.Status(
+				fiber.StatusBadRequest,
+			).JSON(fiber.Map{
+				"error":   "invalid_application",
+				"message": "Permintaan akses aplikasi tidak valid.",
+			})
+
+		case errors.Is(
+			err,
+			services.ErrApplicationEnrollmentUnavailable,
+		):
+			return c.Status(
+				fiber.StatusNotFound,
+			).JSON(fiber.Map{
+				"error":   "application_unavailable",
+				"message": "Aplikasi tidak tersedia.",
+			})
+
+		case errors.Is(
+			err,
+			services.ErrApplicationEnrollmentBlocked,
+		):
+			return c.Status(
+				fiber.StatusForbidden,
+			).JSON(fiber.Map{
+				"error":   "application_access_blocked",
+				"message": "Akses ke aplikasi ini tidak dapat diajukan.",
+			})
+
+		case errors.Is(
+			err,
+			services.ErrInvalidToken,
+		),
+			errors.Is(
+				err,
+				services.ErrAccountUnavailable,
+			):
+
+			return c.Status(
+				fiber.StatusUnauthorized,
+			).JSON(fiber.Map{
+				"error":   "invalid_token",
+				"message": "Access token tidak valid.",
+			})
+
+		default:
+			return c.Status(
+				fiber.StatusInternalServerError,
+			).JSON(fiber.Map{
+				"error":   "internal_error",
+				"message": "Gagal memproses akses aplikasi.",
+			})
+		}
+	}
+
+	return c.Status(
+		fiber.StatusOK,
+	).JSON(fiber.Map{
+		"message":     "Permintaan akses aplikasi berhasil diproses.",
+		"application": request.Application,
+		"status":      status,
+	})
 }
 
 func (h *AuthHandler) Refresh(c *fiber.Ctx) error {

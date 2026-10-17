@@ -23,6 +23,11 @@ func Register(
 	auth.Post("/refresh", authHandler.Refresh)
 	auth.Post("/logout", authHandler.Logout)
 	auth.Put("/password", authMiddleware.RequireAuth, authHandler.ChangePassword)
+	auth.Post(
+		"/applications/enroll",
+		authMiddleware.RequireAuth,
+		authHandler.EnrollApplication,
+	)
 	auth.Get("/me", authMiddleware.RequireAuth, authHandler.Me)
 	auth.Get("/application-context", authMiddleware.RequireAuth, authHandler.ApplicationContext)
 	auth.Get("/klinik-context", authMiddleware.RequireAuth, authHandler.KlinikContext)

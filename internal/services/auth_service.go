@@ -33,6 +33,7 @@ type AuthService struct {
 	centralSessionService              *SessionService
 	centralPasswordChangeService       *CentralPasswordChangeService
 	centralPasswordRecoveryService     *CentralPasswordRecoveryService
+	applicationEnrollmentService       *ApplicationEnrollmentService
 	klinikPasswordRecoveryRedirectURL  string
 	silapetPasswordRecoveryRedirectURL string
 }
@@ -93,6 +94,12 @@ func (s *AuthService) SetCentralPasswordRecoveryService(
 	service *CentralPasswordRecoveryService,
 ) {
 	s.centralPasswordRecoveryService = service
+}
+
+func (s *AuthService) SetApplicationEnrollmentService(
+	service *ApplicationEnrollmentService,
+) {
+	s.applicationEnrollmentService = service
 }
 
 // RegisterCentralIdentity creates a central self-hosted identity
@@ -282,6 +289,47 @@ func (s *AuthService) ResetPassword(
 		ctx,
 		token,
 		password,
+	)
+}
+
+func (s *AuthService) EnrollApplication(
+	ctx context.Context,
+	accessToken string,
+	applicationCode string,
+) (string, error) {
+	accessToken = strings.TrimSpace(
+		accessToken,
+	)
+
+	if accessToken == "" {
+		return "", ErrInvalidToken
+	}
+
+	if s.applicationEnrollmentService == nil {
+		return "", ErrAuthUnavailable
+	}
+
+	identity, err :=
+		s.AuthenticateAccessToken(
+			ctx,
+			accessToken,
+		)
+	if err != nil {
+		return "", err
+	}
+
+	if identity == nil ||
+		strings.TrimSpace(
+			identity.User.ID,
+		) == "" {
+
+		return "", ErrInvalidToken
+	}
+
+	return s.applicationEnrollmentService.Request(
+		ctx,
+		identity.User.ID,
+		applicationCode,
 	)
 }
 
