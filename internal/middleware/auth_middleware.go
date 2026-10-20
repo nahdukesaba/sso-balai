@@ -88,6 +88,12 @@ func handleAuthError(c *fiber.Ctx, err error) error {
 			"message": "Akun tidak memiliki akses.",
 		})
 
+	case errors.Is(err, services.ErrAccountDisabled):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":   "account_disabled",
+			"message": "Akses akun dinonaktifkan.",
+		})
+
 	case errors.Is(err, services.ErrAccountUnavailable):
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error":   "account_unavailable",

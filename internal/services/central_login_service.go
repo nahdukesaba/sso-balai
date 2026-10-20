@@ -22,13 +22,6 @@ type CentralLoginCredentialService interface {
 		appUserID string,
 		password string,
 	) (*models.AuthCredential, error)
-
-	CreateCredential(
-		ctx context.Context,
-		appUserID string,
-		password string,
-		mustChangePassword bool,
-	) (*models.AuthCredential, error)
 }
 
 type CentralLoginApplicationResolver interface {
@@ -53,21 +46,22 @@ type CentralLoginSessionService interface {
 	)
 }
 
-type LegacyCredentialVerifier interface {
-	SignInWithPassword(
+type CentralLoginIdentityLoader interface {
+	GetByUserID(
 		ctx context.Context,
-		email string,
-		password string,
-	) (*models.SupabaseSession, error)
+		userID string,
+	) (*models.Identity, error)
 }
 
+// CentralLoginService authenticates a central identity against
+// auth_credentials only, then derives application authorization from
+// app_memberships. It never creates memberships.
 type CentralLoginService struct {
-	users            CentralLoginUserStore
-	credentials      CentralLoginCredentialService
-	applications     CentralLoginApplicationResolver
-	sessions         CentralLoginSessionService
-	identityService  *IdentityService
-	legacyCredential LegacyCredentialVerifier
+	users        CentralLoginUserStore
+	credentials  CentralLoginCredentialService
+	applications CentralLoginApplicationResolver
+	sessions     CentralLoginSessionService
+	identities   CentralLoginIdentityLoader
 }
 
 func NewCentralLoginService(
@@ -75,16 +69,14 @@ func NewCentralLoginService(
 	credentials CentralLoginCredentialService,
 	applications CentralLoginApplicationResolver,
 	sessions CentralLoginSessionService,
-	identityService *IdentityService,
-	legacyCredential LegacyCredentialVerifier,
+	identities CentralLoginIdentityLoader,
 ) *CentralLoginService {
 	return &CentralLoginService{
-		users:            users,
-		credentials:      credentials,
-		applications:     applications,
-		sessions:         sessions,
-		identityService:  identityService,
-		legacyCredential: legacyCredential,
+		users:        users,
+		credentials:  credentials,
+		applications: applications,
+		sessions:     sessions,
+		identities:   identities,
 	}
 }
 
@@ -107,6 +99,7 @@ func (s *CentralLoginService) Login(
 		return nil, ErrUnsupportedApplication
 	}
 
+	// 1. find central identity
 	user, err := s.users.GetByEmailIncludingDeleted(
 		ctx,
 		email,
@@ -125,15 +118,21 @@ func (s *CentralLoginService) Login(
 		return nil, ErrInvalidCredentials
 	}
 
-	err = s.ensureCentralCredential(
+	// 2. verify central credential
+	_, err = s.credentials.VerifyUserPassword(
 		ctx,
-		user,
+		user.ID,
 		password,
 	)
 	if err != nil {
+		if errors.Is(err, ErrCredentialNotFound) {
+			return nil, ErrPasswordSetupRequired
+		}
+
 		return nil, err
 	}
 
+	// 3-4. resolve application and membership
 	appContext, err := s.applications.GetByAppUserID(
 		ctx,
 		user.ID,
@@ -141,17 +140,11 @@ func (s *CentralLoginService) Login(
 	)
 	if err != nil {
 		switch {
-		case errors.Is(
-			err,
-			ErrApplicationUnavailable,
-		):
+		case errors.Is(err, ErrApplicationUnavailable):
 			return nil, ErrUnsupportedApplication
 
-		case errors.Is(
-			err,
-			ErrApplicationMembershipUnavailable,
-		):
-			return nil, ErrAccountUnavailable
+		case errors.Is(err, ErrApplicationMembershipUnavailable):
+			return nil, ErrApplicationAccessUnavailable
 
 		default:
 			return nil, fmt.Errorf(
@@ -164,9 +157,10 @@ func (s *CentralLoginService) Login(
 	if appContext == nil ||
 		strings.TrimSpace(appContext.ApplicationID) == "" {
 
-		return nil, ErrAccountUnavailable
+		return nil, ErrApplicationAccessUnavailable
 	}
 
+	// 5. enforce membership status
 	if err := membershipLoginStatusError(
 		appContext.Status,
 	); err != nil {
@@ -177,7 +171,7 @@ func (s *CentralLoginService) Login(
 		return nil, ErrAccountUnavailable
 	}
 
-	identity, err := s.identityService.GetByUserID(
+	identity, err := s.identities.GetByUserID(
 		ctx,
 		user.ID,
 	)
@@ -192,6 +186,7 @@ func (s *CentralLoginService) Login(
 		)
 	}
 
+	// 6-7. create session and issue tokens; role comes from membership.
 	tokenSet, _, err := s.sessions.Create(
 		ctx,
 		user.ID,
@@ -228,83 +223,6 @@ func (s *CentralLoginService) Login(
 	}, nil
 }
 
-func (s *CentralLoginService) ensureCentralCredential(
-	ctx context.Context,
-	user *models.AppUser,
-	password string,
-) error {
-	_, err := s.credentials.VerifyUserPassword(
-		ctx,
-		user.ID,
-		password,
-	)
-
-	if err == nil {
-		return nil
-	}
-
-	if !errors.Is(
-		err,
-		ErrCredentialNotFound,
-	) {
-		return err
-	}
-
-	if s.legacyCredential == nil {
-		return ErrInvalidCredentials
-	}
-
-	legacySession, legacyErr :=
-		s.legacyCredential.SignInWithPassword(
-			ctx,
-			user.Email,
-			password,
-		)
-
-	if legacyErr != nil {
-		return legacyErr
-	}
-
-	if legacySession == nil ||
-		legacySession.User.ID != user.ID ||
-		!strings.EqualFold(
-			legacySession.User.Email,
-			user.Email,
-		) {
-
-		return ErrInvalidCredentials
-	}
-
-	_, createErr := s.credentials.CreateCredential(
-		ctx,
-		user.ID,
-		password,
-		false,
-	)
-
-	if createErr == nil {
-		return nil
-	}
-
-	// Concurrent first login may have created the central
-	// credential after our first lookup. Verify again before
-	// surfacing the create error.
-	_, verifyErr := s.credentials.VerifyUserPassword(
-		ctx,
-		user.ID,
-		password,
-	)
-
-	if verifyErr == nil {
-		return nil
-	}
-
-	return fmt.Errorf(
-		"migrate central credential: %w",
-		createErr,
-	)
-}
-
 func membershipLoginStatusError(
 	status string,
 ) error {
@@ -319,7 +237,7 @@ func membershipLoginStatusError(
 		return ErrAccountRejected
 
 	case models.MembershipStatusDisabled:
-		return ErrAccountUnavailable
+		return ErrAccountDisabled
 
 	default:
 		return ErrAccountUnavailable

@@ -6,8 +6,7 @@ Centralized authentication service for BP3KP Sumatera II applications.
 
 - Go
 - Fiber
-- Supabase Auth
-- PostgreSQL
+- PostgreSQL (database only; no Supabase Auth)
 - Git / GitHub
 
 ## Development

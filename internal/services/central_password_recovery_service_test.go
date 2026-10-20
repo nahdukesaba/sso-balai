@@ -22,6 +22,7 @@ type fakeRecoveryStore struct {
 	consumeErr  error
 
 	invalidatedUser bool
+	invalidatedHash string
 	restoredHash    string
 }
 
@@ -54,6 +55,7 @@ func (f *fakeRecoveryStore) InvalidateHash(
 	ctx context.Context,
 	tokenHash string,
 ) error {
+	f.invalidatedHash = tokenHash
 	return nil
 }
 
@@ -464,4 +466,241 @@ func TestCentralPasswordRecoveryKeepsTokenConsumedOnSuccess(
 			"successful reset must leave token consumed",
 		)
 	}
+}
+
+func TestCentralPasswordRecoveryRejectsExpiredToken(
+	t *testing.T,
+) {
+	service := newTestRecoveryService(
+		&fakeRecoveryStore{
+			consumeErr: repository.ErrPasswordResetTokenExpired,
+		},
+		&fakeRecoveryCredentials{},
+		&fakeRecoverySessions{},
+		&fakeRecoveryMailer{},
+	)
+
+	err := service.Reset(
+		context.Background(),
+		"expired-token",
+		"new-password",
+	)
+
+	if !errors.Is(err, ErrResetTokenExpired) {
+		t.Fatalf("expected ErrResetTokenExpired, got %v", err)
+	}
+}
+
+// onceStore models the one-time-use database behaviour: the first consume
+// succeeds, any later consume of the same hash fails.
+type onceStore struct {
+	fakeRecoveryStore
+	used map[string]bool
+}
+
+func (s *onceStore) ConsumeValidByHash(
+	_ context.Context,
+	tokenHash string,
+) (string, error) {
+	if s.used[tokenHash] {
+		return "", repository.ErrPasswordResetTokenNotFound
+	}
+
+	s.used[tokenHash] = true
+
+	return "user-1", nil
+}
+
+func TestCentralPasswordRecoveryTokenCannotBeReused(
+	t *testing.T,
+) {
+	service := newTestRecoveryService(
+		&onceStore{used: map[string]bool{}},
+		&fakeRecoveryCredentials{},
+		&fakeRecoverySessions{},
+		&fakeRecoveryMailer{},
+	)
+
+	if err := service.Reset(
+		context.Background(),
+		"single-use-token",
+		"new-password",
+	); err != nil {
+		t.Fatalf("first reset: %v", err)
+	}
+
+	err := service.Reset(
+		context.Background(),
+		"single-use-token",
+		"another-password",
+	)
+
+	if !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("expected reuse rejection, got %v", err)
+	}
+}
+
+func TestCentralPasswordRecoveryResetUpdatesExistingCredential(
+	t *testing.T,
+) {
+	creds := &fakeRecoveryCredentials{}
+	sessions := &fakeRecoverySessions{}
+
+	service := newTestRecoveryService(
+		&fakeRecoveryStore{consumedID: "user-1"},
+		creds,
+		sessions,
+		&fakeRecoveryMailer{},
+	)
+
+	if err := service.Reset(
+		context.Background(),
+		"token",
+		"new-password",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if !creds.replaced || creds.created {
+		t.Fatal("existing credential must be updated, not created")
+	}
+
+	if sessions.revokedUser != "user-1" {
+		t.Fatal("sessions must be revoked on reset")
+	}
+}
+
+type failingRecoveryMailer struct{}
+
+func (failingRecoveryMailer) SendPasswordReset(
+	context.Context,
+	string,
+	string,
+) error {
+	return errors.New("smtp unavailable")
+}
+
+func TestCentralPasswordRecoveryResponseDoesNotDiscloseExistence(
+	t *testing.T,
+) {
+	// Known identity, delivery failure: same nil result as unknown email.
+	known := newTestRecoveryService(
+		&fakeRecoveryStore{
+			userID: "user-1",
+			email:  "user@example.com",
+			found:  true,
+		},
+		&fakeRecoveryCredentials{},
+		&fakeRecoverySessions{},
+		failingRecoveryMailer{},
+	)
+
+	unknown := newTestRecoveryService(
+		&fakeRecoveryStore{},
+		&fakeRecoveryCredentials{},
+		&fakeRecoverySessions{},
+		&fakeRecoveryMailer{},
+	)
+
+	if err := known.Request(
+		context.Background(),
+		"user@example.com",
+	); err != nil {
+		t.Fatalf("known identity: %v", err)
+	}
+
+	if err := unknown.Request(
+		context.Background(),
+		"nobody@example.com",
+	); err != nil {
+		t.Fatalf("unknown identity: %v", err)
+	}
+}
+
+func TestCentralPasswordRecoveryRequestWorksWithoutCredential(
+	t *testing.T,
+) {
+	// The recovery store only looks at app_users, never auth_credentials,
+	// so a legacy identity with no credential still receives a setup link.
+	store := &fakeRecoveryStore{
+		userID: "legacy-user",
+		email:  "legacy@example.com",
+		found:  true,
+	}
+
+	mailer := &fakeRecoveryMailer{}
+
+	service := newTestRecoveryService(
+		store,
+		&fakeRecoveryCredentials{},
+		&fakeRecoverySessions{},
+		mailer,
+	)
+
+	if err := service.Request(
+		context.Background(),
+		"legacy@example.com",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if mailer.email != "legacy@example.com" ||
+		!strings.HasPrefix(
+			mailer.resetURL,
+			"https://sso.example.com/reset-password?token=",
+		) {
+
+		t.Fatalf("unexpected setup mail: %q", mailer.resetURL)
+	}
+
+	if !store.invalidatedUser {
+		t.Fatal("previous tokens must be invalidated")
+	}
+}
+
+func TestCentralPasswordRecoveryBurnsUndeliveredToken(
+    t *testing.T,
+) {
+    store := &fakeRecoveryStore{
+        userID: "user-1",
+        email:  "user@example.com",
+        found:  true,
+    }
+
+    service := newTestRecoveryService(
+        store,
+        &fakeRecoveryCredentials{},
+        &fakeRecoverySessions{},
+        failingRecoveryMailer{},
+    )
+
+    if err := service.Request(
+        context.Background(),
+        "user@example.com",
+    ); err != nil {
+        t.Fatalf(
+            "request must remain enumeration-safe: %v",
+            err,
+        )
+    }
+
+    if store.createdHash == "" {
+        t.Fatal(
+            "expected reset token to be created before delivery",
+        )
+    }
+
+    if store.invalidatedHash == "" {
+        t.Fatal(
+            "undelivered reset token must be invalidated",
+        )
+    }
+
+    if store.invalidatedHash != store.createdHash {
+        t.Fatalf(
+            "invalidated token hash %q does not match created hash %q",
+            store.invalidatedHash,
+            store.createdHash,
+        )
+    }
 }

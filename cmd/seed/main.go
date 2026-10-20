@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load()
+	cfg, err := config.LoadBootstrap()
 	if err != nil {
 		log.Fatalf("failed to load configuration: %v", err)
 	}
@@ -47,10 +47,10 @@ func main() {
 
 	result, err := bootstrapService.Bootstrap(
 		ctx,
-		cfg.BootstrapEmail,
-		cfg.BootstrapPassword,
-		cfg.BootstrapName,
-		cfg.BootstrapRole,
+		cfg.Email,
+		cfg.Password,
+		cfg.Name,
+		cfg.Role,
 	)
 	if err != nil {
 		switch {

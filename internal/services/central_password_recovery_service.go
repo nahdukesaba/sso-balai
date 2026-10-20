@@ -289,6 +289,13 @@ func (s *CentralPasswordRecoveryService) Reset(
 	if err != nil {
 		if errors.Is(
 			err,
+			repository.ErrPasswordResetTokenExpired,
+		) {
+			return ErrResetTokenExpired
+		}
+
+		if errors.Is(
+			err,
 			repository.ErrPasswordResetTokenNotFound,
 		) {
 			return ErrInvalidToken

@@ -20,26 +20,6 @@ type CentralPasswordCredentialService interface {
 		appUserID string,
 		newPassword string,
 	) (*models.AuthCredential, error)
-
-	CreateCredential(
-		ctx context.Context,
-		appUserID string,
-		password string,
-		mustChangePassword bool,
-	) (*models.AuthCredential, error)
-}
-
-type CentralPasswordLegacyVerifier interface {
-	SignInWithPassword(
-		ctx context.Context,
-		email string,
-		password string,
-	) (*models.SupabaseSession, error)
-
-	SignOut(
-		ctx context.Context,
-		accessToken string,
-	) error
 }
 
 type CentralPasswordChangeSessionRevoker interface {
@@ -49,20 +29,21 @@ type CentralPasswordChangeSessionRevoker interface {
 	) error
 }
 
+// CentralPasswordChangeService changes a password for an authenticated
+// identity. The current password is verified against auth_credentials only.
+// All central sessions (including the caller's) are revoked afterwards, so
+// the client must log in again with the new password.
 type CentralPasswordChangeService struct {
 	credentials CentralPasswordCredentialService
-	legacy      CentralPasswordLegacyVerifier
 	sessions    CentralPasswordChangeSessionRevoker
 }
 
 func NewCentralPasswordChangeService(
 	credentials CentralPasswordCredentialService,
-	legacy CentralPasswordLegacyVerifier,
 	sessions CentralPasswordChangeSessionRevoker,
 ) *CentralPasswordChangeService {
 	return &CentralPasswordChangeService{
 		credentials: credentials,
-		legacy:      legacy,
 		sessions:    sessions,
 	}
 }
@@ -70,14 +51,12 @@ func NewCentralPasswordChangeService(
 func (s *CentralPasswordChangeService) Change(
 	ctx context.Context,
 	appUserID string,
-	email string,
 	oldPassword string,
 	newPassword string,
 ) error {
 	appUserID = strings.TrimSpace(appUserID)
-	email = strings.ToLower(strings.TrimSpace(email))
 
-	if appUserID == "" || email == "" || oldPassword == "" {
+	if appUserID == "" || oldPassword == "" {
 		return ErrInvalidCurrentPassword
 	}
 
@@ -96,88 +75,24 @@ func (s *CentralPasswordChangeService) Change(
 		appUserID,
 		oldPassword,
 	)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidCredentials):
+			return ErrInvalidCurrentPassword
 
-	switch {
-	case err == nil:
-		_, err = s.credentials.ReplacePassword(
-			ctx,
-			appUserID,
-			newPassword,
-		)
-		if err != nil {
+		case errors.Is(err, ErrCredentialNotFound):
+			return ErrPasswordSetupRequired
+
+		default:
 			return err
 		}
-
-		return s.sessions.RevokeAllByAppUserID(
-			ctx,
-			appUserID,
-		)
-
-	case errors.Is(err, ErrInvalidCredentials):
-		return ErrInvalidCurrentPassword
-
-	case !errors.Is(err, ErrCredentialNotFound):
-		return err
 	}
 
-	// Transitional legacy bridge:
-	//
-	// Users that existed before self-hosted credentials were introduced
-	// do not yet have an auth_credentials row. Supabase is used only to
-	// prove knowledge of the legacy password. The new password is stored
-	// exclusively in Central SSO.
-	if s.legacy == nil {
-		return ErrAuthUnavailable
-	}
-
-	legacySession, err := s.legacy.SignInWithPassword(
-		ctx,
-		email,
-		oldPassword,
-	)
-	if err != nil {
-		if errors.Is(err, ErrInvalidCredentials) {
-			return ErrInvalidCurrentPassword
-		}
-
-		return err
-	}
-
-	if legacySession == nil ||
-		strings.TrimSpace(legacySession.User.ID) == "" {
-
-		return ErrAuthUnavailable
-	}
-
-	if strings.TrimSpace(legacySession.AccessToken) != "" {
-		defer func() {
-			_ = s.legacy.SignOut(
-				context.Background(),
-				legacySession.AccessToken,
-			)
-		}()
-	}
-
-	if strings.TrimSpace(legacySession.User.ID) != appUserID ||
-		!strings.EqualFold(
-			strings.TrimSpace(legacySession.User.Email),
-			email,
-		) {
-
-		return ErrInvalidCurrentPassword
-	}
-
-	if oldPassword == newPassword {
-		return ErrSamePassword
-	}
-
-	_, err = s.credentials.CreateCredential(
+	if _, err := s.credentials.ReplacePassword(
 		ctx,
 		appUserID,
 		newPassword,
-		false,
-	)
-	if err != nil {
+	); err != nil {
 		return err
 	}
 

@@ -336,7 +336,7 @@ func (h *AuthHandler) ResetPassword(
 
 	// tokenHash remains accepted temporarily so existing clients do
 	// not break. In the self-hosted flow its value is treated as the
-	// raw opaque central recovery token, not a Supabase token hash.
+	// raw opaque Central SSO recovery token.
 	if request.Token == "" {
 		request.Token = request.TokenHash
 	}
@@ -412,7 +412,6 @@ func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
 	if err := h.authService.ChangePassword(
 		c.UserContext(),
 		identity.User.ID,
-		identity.User.Email,
 		request.OldPassword,
 		request.NewPassword,
 	); err != nil {
@@ -803,6 +802,12 @@ func handleChangePasswordError(
 			"message": "Password saat ini tidak benar.",
 		})
 
+	case errors.Is(err, services.ErrPasswordSetupRequired):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":   "password_setup_required",
+			"message": "Password akun belum diatur. Gunakan fitur lupa password untuk membuat password.",
+		})
+
 	case errors.Is(err, services.ErrSamePassword):
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":   "same_password",
@@ -856,6 +861,12 @@ func handleResetPasswordError(
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":   "invalid_password",
 			"message": "Password baru tidak memenuhi ketentuan.",
+		})
+
+	case errors.Is(err, services.ErrResetTokenExpired):
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error":   "reset_token_expired",
+			"message": "Tautan reset password sudah kedaluwarsa. Silakan minta tautan baru.",
 		})
 
 	case errors.Is(err, services.ErrInvalidToken):
@@ -929,6 +940,12 @@ func handleLoginError(c *fiber.Ctx, err error) error {
 			"message": "Email atau password salah.",
 		})
 
+	case errors.Is(err, services.ErrPasswordSetupRequired):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":   "password_setup_required",
+			"message": "Password akun belum diatur. Gunakan fitur lupa password untuk membuat password.",
+		})
+
 	case errors.Is(err, services.ErrAccountPending):
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error":   "account_pending",
@@ -941,6 +958,24 @@ func handleLoginError(c *fiber.Ctx, err error) error {
 			"message": "Akun tidak memiliki akses.",
 		})
 
+	case errors.Is(err, services.ErrAccountDisabled):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":   "account_disabled",
+			"message": "Akses akun dinonaktifkan.",
+		})
+
+	case errors.Is(err, services.ErrApplicationAccessUnavailable):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":   "application_access_unavailable",
+			"message": "Pengguna tidak terdaftar pada aplikasi ini.",
+		})
+
+	case errors.Is(err, services.ErrUnsupportedApplication):
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "unsupported_application",
+			"message": "Aplikasi tidak didukung atau sedang tidak aktif.",
+		})
+
 	case errors.Is(err, services.ErrAccountUnavailable):
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error":   "account_unavailable",
@@ -951,12 +986,6 @@ func handleLoginError(c *fiber.Ctx, err error) error {
 		return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
 			"error":   "rate_limited",
 			"message": "Terlalu banyak percobaan login. Coba kembali nanti.",
-		})
-
-	case errors.Is(err, services.ErrKlinikMigrationConflict):
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error":   "identity_conflict",
-			"message": "Identitas akun tidak dapat dimigrasikan secara otomatis.",
 		})
 
 	case errors.Is(err, services.ErrAuthUnavailable):
@@ -979,6 +1008,18 @@ func handleRefreshError(c *fiber.Ctx, err error) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error":   "invalid_refresh_token",
 			"message": "Refresh token tidak valid atau sudah kedaluwarsa.",
+		})
+
+	case errors.Is(err, services.ErrAccountDisabled):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":   "account_disabled",
+			"message": "Akses akun dinonaktifkan.",
+		})
+
+	case errors.Is(err, services.ErrApplicationAccessUnavailable):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":   "application_access_unavailable",
+			"message": "Pengguna tidak terdaftar pada aplikasi ini.",
 		})
 
 	case errors.Is(err, services.ErrAccountPending):

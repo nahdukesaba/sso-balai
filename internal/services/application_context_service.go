@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/nahdukesaba/sso-balai/internal/models"
-	"github.com/nahdukesaba/sso-balai/internal/repository"
 )
 
 var (
@@ -15,14 +14,29 @@ var (
 	ErrApplicationMembershipUnavailable = errors.New("application membership unavailable")
 )
 
+type ApplicationLookup interface {
+	GetByCode(
+		ctx context.Context,
+		code string,
+	) (*models.Application, error)
+}
+
+type MembershipLookup interface {
+	GetByAppUserAndApplicationID(
+		ctx context.Context,
+		appUserID string,
+		applicationID string,
+	) (*models.AppMembership, error)
+}
+
 type ApplicationContextService struct {
-	applicationRepository *repository.ApplicationRepository
-	membershipRepository  *repository.MembershipRepository
+	applicationRepository ApplicationLookup
+	membershipRepository  MembershipLookup
 }
 
 func NewApplicationContextService(
-	applicationRepository *repository.ApplicationRepository,
-	membershipRepository *repository.MembershipRepository,
+	applicationRepository ApplicationLookup,
+	membershipRepository MembershipLookup,
 ) *ApplicationContextService {
 	return &ApplicationContextService{
 		applicationRepository: applicationRepository,

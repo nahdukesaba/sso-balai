@@ -22,7 +22,7 @@ func (f *fakeCentralLoginUsers) GetByEmailIncludingDeleted(
 type fakeCentralLoginCredentials struct {
 	hasCredential bool
 	password      string
-	createCalls   int
+	verifyCalls   int
 }
 
 func (f *fakeCentralLoginCredentials) VerifyUserPassword(
@@ -30,6 +30,8 @@ func (f *fakeCentralLoginCredentials) VerifyUserPassword(
 	appUserID string,
 	password string,
 ) (*models.AuthCredential, error) {
+	f.verifyCalls++
+
 	if !f.hasCredential {
 		return nil, ErrCredentialNotFound
 	}
@@ -44,33 +46,33 @@ func (f *fakeCentralLoginCredentials) VerifyUserPassword(
 	}, nil
 }
 
-func (f *fakeCentralLoginCredentials) CreateCredential(
+type fakeApplicationLookup struct {
+	applications map[string]*models.Application
+}
+
+func (f *fakeApplicationLookup) GetByCode(
+	_ context.Context,
+	code string,
+) (*models.Application, error) {
+	return f.applications[code], nil
+}
+
+// fakeMembershipLookup is read-only on purpose: there is no way for the
+// login path to create a membership through it.
+type fakeMembershipLookup struct {
+	// key: appUserID + "|" + applicationID
+	memberships map[string]*models.AppMembership
+	lookups     int
+}
+
+func (f *fakeMembershipLookup) GetByAppUserAndApplicationID(
 	_ context.Context,
 	appUserID string,
-	password string,
-	_ bool,
-) (*models.AuthCredential, error) {
-	f.createCalls++
-	f.hasCredential = true
-	f.password = password
+	applicationID string,
+) (*models.AppMembership, error) {
+	f.lookups++
 
-	return &models.AuthCredential{
-		AppUserID:         appUserID,
-		PasswordAlgorithm: models.PasswordAlgorithmBcrypt,
-	}, nil
-}
-
-type fakeCentralLoginApplications struct {
-	context *models.ApplicationContext
-	err     error
-}
-
-func (f *fakeCentralLoginApplications) GetByAppUserID(
-	_ context.Context,
-	_ string,
-	_ string,
-) (*models.ApplicationContext, error) {
-	return f.context, f.err
+	return f.memberships[appUserID+"|"+applicationID], nil
 }
 
 type fakeCentralLoginSessions struct {
@@ -114,25 +116,31 @@ func (f *fakeCentralLoginSessions) Create(
 		nil
 }
 
-type fakeLegacyCredentialVerifier struct {
-	calls   int
-	session *models.SupabaseSession
-	err     error
-}
+type fakeCentralLoginIdentities struct{}
 
-func (f *fakeLegacyCredentialVerifier) SignInWithPassword(
+func (f *fakeCentralLoginIdentities) GetByUserID(
 	_ context.Context,
-	_ string,
-	_ string,
-) (*models.SupabaseSession, error) {
-	f.calls++
-
-	return f.session, f.err
+	userID string,
+) (*models.Identity, error) {
+	return &models.Identity{
+		User: &models.AppUser{
+			ID:    userID,
+			Email: "user@example.com",
+		},
+	}, nil
 }
 
-func TestCentralLoginUsesCentralCredential(
-	t *testing.T,
-) {
+type loginHarness struct {
+	service     *CentralLoginService
+	credentials *fakeCentralLoginCredentials
+	sessions    *fakeCentralLoginSessions
+	memberships *fakeMembershipLookup
+}
+
+func newLoginHarness(
+	hasCredential bool,
+	memberships map[string]*models.AppMembership,
+) *loginHarness {
 	user := &models.AppUser{
 		ID:       "user-1",
 		Email:    "user@example.com",
@@ -140,243 +148,316 @@ func TestCentralLoginUsesCentralCredential(
 	}
 
 	credentials := &fakeCentralLoginCredentials{
-		hasCredential: true,
+		hasCredential: hasCredential,
 		password:      "Password123!",
 	}
 
 	sessions := &fakeCentralLoginSessions{}
 
-	legacy := &fakeLegacyCredentialVerifier{}
-
-	service := &CentralLoginService{
-		users:       &fakeCentralLoginUsers{user: user},
-		credentials: credentials,
-		applications: &fakeCentralLoginApplications{
-			context: &models.ApplicationContext{
-				UserID:        user.ID,
-				ApplicationID: "app-silapet",
-				Application:   "silapet",
-				Role:          "user",
-				Status:        models.MembershipStatusApproved,
-			},
-		},
-		sessions:         sessions,
-		legacyCredential: legacy,
+	membershipLookup := &fakeMembershipLookup{
+		memberships: memberships,
 	}
 
-	// Avoid database dependency in this unit test by testing
-	// the composition until identity loading separately below.
-	err := service.ensureCentralCredential(
-		context.Background(),
-		user,
-		"Password123!",
-	)
-	if err != nil {
-		t.Fatalf(
-			"verify central credential: %v",
-			err,
-		)
-	}
-
-	if legacy.calls != 0 {
-		t.Fatalf(
-			"legacy verifier must not be called, got %d",
-			legacy.calls,
-		)
-	}
-}
-
-func TestCentralLoginMigratesLegacyCredential(
-	t *testing.T,
-) {
-	user := &models.AppUser{
-		ID:    "user-1",
-		Email: "user@example.com",
-	}
-
-	credentials := &fakeCentralLoginCredentials{}
-
-	legacy := &fakeLegacyCredentialVerifier{
-		session: &models.SupabaseSession{
-			User: models.SupabaseAuthUser{
-				ID:    user.ID,
-				Email: user.Email,
-			},
-		},
-	}
-
-	service := &CentralLoginService{
-		credentials:      credentials,
-		legacyCredential: legacy,
-	}
-
-	err := service.ensureCentralCredential(
-		context.Background(),
-		user,
-		"Password123!",
-	)
-	if err != nil {
-		t.Fatalf(
-			"migrate legacy credential: %v",
-			err,
-		)
-	}
-
-	if legacy.calls != 1 {
-		t.Fatalf(
-			"expected one legacy verification, got %d",
-			legacy.calls,
-		)
-	}
-
-	if credentials.createCalls != 1 {
-		t.Fatalf(
-			"expected one central credential create, got %d",
-			credentials.createCalls,
-		)
-	}
-
-	err = service.ensureCentralCredential(
-		context.Background(),
-		user,
-		"Password123!",
-	)
-	if err != nil {
-		t.Fatalf(
-			"verify migrated credential: %v",
-			err,
-		)
-	}
-
-	if legacy.calls != 1 {
-		t.Fatal(
-			"legacy verifier must not be used after migration",
-		)
-	}
-}
-
-func TestCentralLoginRejectsLegacyIdentityMismatch(
-	t *testing.T,
-) {
-	user := &models.AppUser{
-		ID:    "user-1",
-		Email: "user@example.com",
-	}
-
-	service := &CentralLoginService{
-		credentials: &fakeCentralLoginCredentials{},
-		legacyCredential: &fakeLegacyCredentialVerifier{
-			session: &models.SupabaseSession{
-				User: models.SupabaseAuthUser{
-					ID:    "different-user",
-					Email: user.Email,
+	applicationContext := NewApplicationContextService(
+		&fakeApplicationLookup{
+			applications: map[string]*models.Application{
+				"silapet": {
+					ID:       "app-silapet",
+					Code:     "silapet",
+					Name:     "SILAPET",
+					IsActive: true,
+				},
+				"klinik_pkp": {
+					ID:       "app-klinik",
+					Code:     "klinik_pkp",
+					Name:     "Klinik PKP",
+					IsActive: true,
+				},
+				"arsiparis": {
+					ID:       "app-arsip",
+					Code:     "arsiparis",
+					Name:     "Arsiparis",
+					IsActive: true,
 				},
 			},
 		},
-	}
-
-	err := service.ensureCentralCredential(
-		context.Background(),
-		user,
-		"Password123!",
+		membershipLookup,
 	)
 
-	if !errors.Is(
-		err,
-		ErrInvalidCredentials,
-	) {
-		t.Fatalf(
-			"expected ErrInvalidCredentials, got %v",
-			err,
-		)
+	return &loginHarness{
+		service: NewCentralLoginService(
+			&fakeCentralLoginUsers{user: user},
+			credentials,
+			applicationContext,
+			sessions,
+			&fakeCentralLoginIdentities{},
+		),
+		credentials: credentials,
+		sessions:    sessions,
+		memberships: membershipLookup,
 	}
 }
 
-func TestCentralLoginRejectsWrongCentralPassword(
-	t *testing.T,
-) {
-	user := &models.AppUser{
-		ID:    "user-1",
-		Email: "user@example.com",
-	}
-
-	legacy := &fakeLegacyCredentialVerifier{}
-
-	service := &CentralLoginService{
-		credentials: &fakeCentralLoginCredentials{
-			hasCredential: true,
-			password:      "CorrectPassword123!",
-		},
-		legacyCredential: legacy,
-	}
-
-	err := service.ensureCentralCredential(
-		context.Background(),
-		user,
-		"WrongPassword123!",
-	)
-
-	if !errors.Is(
-		err,
-		ErrInvalidCredentials,
-	) {
-		t.Fatalf(
-			"expected ErrInvalidCredentials, got %v",
-			err,
-		)
-	}
-
-	if legacy.calls != 0 {
-		t.Fatal(
-			"wrong central password must not fall back to legacy auth",
-		)
+func membership(
+	applicationID string,
+	role string,
+	status string,
+) *models.AppMembership {
+	return &models.AppMembership{
+		AppUserID:     "user-1",
+		ApplicationID: applicationID,
+		Role:          role,
+		Status:        status,
 	}
 }
 
-func TestCentralLoginMembershipStatus(
+func multiAppMemberships() map[string]*models.AppMembership {
+	return map[string]*models.AppMembership{
+		"user-1|app-silapet": membership(
+			"app-silapet",
+			"user",
+			models.MembershipStatusApproved,
+		),
+		"user-1|app-klinik": membership(
+			"app-klinik",
+			"admin",
+			models.MembershipStatusApproved,
+		),
+	}
+}
+
+func TestCentralLoginReturnsAppSpecificAuthorization(
 	t *testing.T,
 ) {
+	harness := newLoginHarness(true, multiAppMemberships())
+
 	tests := []struct {
-		name   string
-		status string
-		err    error
+		application string
+		wantRole    string
+		wantAppID   string
 	}{
-		{
-			name:   "pending",
-			status: models.MembershipStatusPending,
-			err:    ErrAccountPending,
-		},
-		{
-			name:   "rejected",
-			status: models.MembershipStatusRejected,
-			err:    ErrAccountRejected,
-		},
-		{
-			name:   "disabled",
-			status: models.MembershipStatusDisabled,
-			err:    ErrAccountUnavailable,
-		},
+		{"silapet", "user", "app-silapet"},
+		{"klinik_pkp", "admin", "app-klinik"},
 	}
 
 	for _, test := range tests {
-		t.Run(
-			test.name,
-			func(t *testing.T) {
-				statusErr := membershipLoginStatusError(
-					test.status,
-				)
+		t.Run(test.application, func(t *testing.T) {
+			result, err := harness.service.Login(
+				context.Background(),
+				"user@example.com",
+				"Password123!",
+				test.application,
+			)
+			if err != nil {
+				t.Fatalf("login: %v", err)
+			}
 
-				if !errors.Is(
-					statusErr,
-					test.err,
-				) {
-					t.Fatalf(
-						"expected %v, got %v",
-						test.err,
-						statusErr,
-					)
-				}
-			},
+			if result.Session.AccessToken == "" {
+				t.Fatal("expected access token")
+			}
+
+			if harness.sessions.role != test.wantRole {
+				t.Fatalf(
+					"expected role %q, got %q",
+					test.wantRole,
+					harness.sessions.role,
+				)
+			}
+
+			if harness.sessions.applicationID != test.wantAppID ||
+				harness.sessions.applicationCode != test.application {
+
+				t.Fatalf(
+					"unexpected session scope %q/%q",
+					harness.sessions.applicationID,
+					harness.sessions.applicationCode,
+				)
+			}
+		})
+	}
+}
+
+func TestCentralLoginWithoutMembershipDoesNotCreateOne(
+	t *testing.T,
+) {
+	memberships := multiAppMemberships()
+	before := len(memberships)
+
+	harness := newLoginHarness(true, memberships)
+
+	_, err := harness.service.Login(
+		context.Background(),
+		"user@example.com",
+		"Password123!",
+		"arsiparis",
+	)
+
+	if !errors.Is(err, ErrApplicationAccessUnavailable) {
+		t.Fatalf(
+			"expected ErrApplicationAccessUnavailable, got %v",
+			err,
+		)
+	}
+
+	if len(memberships) != before {
+		t.Fatal("login must never create a membership")
+	}
+
+	if harness.sessions.createCalls != 0 {
+		t.Fatal("no session may be created without membership")
+	}
+}
+
+func TestCentralLoginMembershipStatuses(
+	t *testing.T,
+) {
+	tests := []struct {
+		status string
+		err    error
+	}{
+		{models.MembershipStatusPending, ErrAccountPending},
+		{models.MembershipStatusRejected, ErrAccountRejected},
+		{models.MembershipStatusDisabled, ErrAccountDisabled},
+		{"something-else", ErrAccountUnavailable},
+	}
+
+	for _, test := range tests {
+		t.Run(test.status, func(t *testing.T) {
+			harness := newLoginHarness(
+				true,
+				map[string]*models.AppMembership{
+					"user-1|app-silapet": membership(
+						"app-silapet",
+						"user",
+						test.status,
+					),
+				},
+			)
+
+			_, err := harness.service.Login(
+				context.Background(),
+				"user@example.com",
+				"Password123!",
+				"silapet",
+			)
+
+			if !errors.Is(err, test.err) {
+				t.Fatalf("expected %v, got %v", test.err, err)
+			}
+
+			if harness.sessions.createCalls != 0 {
+				t.Fatal("no session for non-approved membership")
+			}
+		})
+	}
+}
+
+func TestCentralLoginRejectsWrongPassword(
+	t *testing.T,
+) {
+	harness := newLoginHarness(true, multiAppMemberships())
+
+	_, err := harness.service.Login(
+		context.Background(),
+		"user@example.com",
+		"WrongPassword123!",
+		"silapet",
+	)
+
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+}
+
+func TestCentralLoginUnknownEmailIsInvalidCredentials(
+	t *testing.T,
+) {
+	service := NewCentralLoginService(
+		&fakeCentralLoginUsers{},
+		&fakeCentralLoginCredentials{},
+		nil,
+		&fakeCentralLoginSessions{},
+		&fakeCentralLoginIdentities{},
+	)
+
+	_, err := service.Login(
+		context.Background(),
+		"nobody@example.com",
+		"Password123!",
+		"silapet",
+	)
+
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+}
+
+func TestCentralLoginIdentityWithoutCredentialRequiresPasswordSetup(
+	t *testing.T,
+) {
+	harness := newLoginHarness(false, multiAppMemberships())
+
+	_, err := harness.service.Login(
+		context.Background(),
+		"user@example.com",
+		"AnyPassword123!",
+		"silapet",
+	)
+
+	if !errors.Is(err, ErrPasswordSetupRequired) {
+		t.Fatalf("expected ErrPasswordSetupRequired, got %v", err)
+	}
+
+	if harness.sessions.createCalls != 0 {
+		t.Fatal("no session without credential")
+	}
+}
+
+func TestApplicationContextResolvesRoleAndStatusFromMemberships(
+	t *testing.T,
+) {
+	harness := newLoginHarness(true, multiAppMemberships())
+
+	service := harness.service.applications
+
+	klinik, err := service.GetByAppUserID(
+		context.Background(),
+		"user-1",
+		"klinik_pkp",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if klinik.Role != "admin" ||
+		klinik.Status != models.MembershipStatusApproved {
+
+		t.Fatalf("unexpected klinik context %+v", klinik)
+	}
+
+	silapet, err := service.GetByAppUserID(
+		context.Background(),
+		"user-1",
+		"silapet",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if silapet.Role != "user" {
+		t.Fatalf("unexpected silapet role %q", silapet.Role)
+	}
+
+	_, err = service.GetByAppUserID(
+		context.Background(),
+		"user-1",
+		"arsiparis",
+	)
+
+	if !errors.Is(err, ErrApplicationMembershipUnavailable) {
+		t.Fatalf(
+			"expected ErrApplicationMembershipUnavailable, got %v",
+			err,
 		)
 	}
 }

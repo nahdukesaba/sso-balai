@@ -15,6 +15,10 @@ var ErrPasswordResetTokenNotFound = errors.New(
 	"password reset token not found",
 )
 
+var ErrPasswordResetTokenExpired = errors.New(
+	"password reset token expired",
+)
+
 type PasswordResetRepository struct {
 	pool *pgxpool.Pool
 }
@@ -197,6 +201,27 @@ func (r *PasswordResetRepository) ConsumeValidByHash(
 	).Scan(&appUserID)
 
 	if errors.Is(err, pgx.ErrNoRows) {
+		// Distinguish an expired (but never used) token from an unknown
+		// or already-used one.
+		var expired bool
+
+		checkErr := r.pool.QueryRow(
+			ctx,
+			`
+			SELECT EXISTS (
+				SELECT 1
+				FROM public.password_reset_tokens
+				WHERE token_hash = $1
+				  AND used_at IS NULL
+				  AND expires_at <= NOW()
+			)
+			`,
+			tokenHash,
+		).Scan(&expired)
+		if checkErr == nil && expired {
+			return "", ErrPasswordResetTokenExpired
+		}
+
 		return "", ErrPasswordResetTokenNotFound
 	}
 

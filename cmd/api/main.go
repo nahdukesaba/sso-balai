@@ -97,63 +97,37 @@ func main() {
 		)
 	}
 
-	supabaseAuthService, err := services.NewSupabaseAuthService(
-		cfg.SupabaseURL,
-		cfg.SupabasePublicKey,
-	)
-	if err != nil {
-		log.Fatalf("failed to initialize Supabase authentication: %v", err)
-	}
-
 	centralLoginService := services.NewCentralLoginService(
 		userRepository,
 		credentialService,
 		applicationContextService,
 		sessionService,
 		identityService,
-		supabaseAuthService,
-	)
-
-	supabaseAdminService, err := services.NewSupabaseAdminService(
-		cfg.SupabaseURL,
-		cfg.SupabaseAdminKey,
-	)
-	if err != nil {
-		log.Fatalf(
-			"failed to initialize Supabase admin service: %v",
-			err,
-		)
-	}
-
-	klinikCredentialService := services.NewKlinikCredentialService(
-		klinikUserRepository,
-	)
-
-	klinikMigrationService := services.NewKlinikMigrationService(
-		klinikCredentialService,
-		supabaseAdminService,
-		userRepository,
-		pegawaiRepository,
-		klinikUserRepository,
 	)
 
 	centralPasswordChangeService :=
 		services.NewCentralPasswordChangeService(
 			credentialService,
-			supabaseAuthService,
 			sessionRepository,
 		)
 
-	resendRecoveryMailer, err :=
-		services.NewResendRecoveryMailer(
-			cfg.ResendAPIKey,
-			cfg.ResendFromEmail,
-			cfg.ResendFromName,
+	// SMTP must never prevent Central SSO from starting. A missing or
+	// invalid configuration degrades only recovery email delivery.
+	recoveryMailer, mailerErr :=
+		services.NewRecoveryMailer(
+			services.SMTPConfig{
+				Host:      cfg.SMTPHost,
+				Port:      cfg.SMTPPort,
+				Username:  cfg.SMTPUsername,
+				Password:  cfg.SMTPPassword,
+				FromName:  cfg.SMTPFromName,
+				FromEmail: cfg.SMTPFromEmail,
+			},
 		)
-	if err != nil {
-		log.Fatalf(
-			"failed to initialize recovery mailer: %v",
-			err,
+	if mailerErr != nil {
+		log.Printf(
+			"WARNING: password recovery email delivery unavailable: %v",
+			mailerErr,
 		)
 	}
 
@@ -162,7 +136,7 @@ func main() {
 			passwordResetRepository,
 			credentialService,
 			sessionRepository,
-			resendRecoveryMailer,
+			recoveryMailer,
 			cfg.SSOPublicURL,
 		)
 	if err != nil {
@@ -178,15 +152,8 @@ func main() {
 		)
 
 	authService := services.NewAuthService(
-		supabaseAuthService,
-		supabaseAdminService,
 		identityService,
-		userRepository,
-		klinikContextService,
 		applicationContextService,
-		klinikMigrationService,
-		cfg.KlinikPasswordRecoveryRedirectURL,
-		cfg.SilapetPasswordRecoveryRedirectURL,
 	)
 
 	authService.SetCentralLoginService(

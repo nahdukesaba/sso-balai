@@ -6,63 +6,57 @@ import (
 	"strings"
 
 	"github.com/nahdukesaba/sso-balai/internal/models"
-	"github.com/nahdukesaba/sso-balai/internal/repository"
 )
 
 var (
+	ErrInvalidCredentials = errors.New("invalid email or password")
+	ErrInvalidToken       = errors.New("invalid access token")
+	ErrInvalidPassword    = errors.New("invalid password")
+	ErrSamePassword       = errors.New("new password must be different from old password")
+	ErrAuthRateLimited    = errors.New("too many authentication attempts")
+	ErrAuthUnavailable    = errors.New("authentication service unavailable")
+
 	ErrAccountPending               = errors.New("account is pending approval")
 	ErrAccountRejected              = errors.New("account is rejected")
+	ErrAccountDisabled              = errors.New("account is disabled")
 	ErrAccountUnavailable           = errors.New("account is unavailable")
+	ErrApplicationAccessUnavailable = errors.New("application access is unavailable")
 	ErrAccountAlreadyExists         = errors.New("central account already exists")
 	ErrRegistrationIdentityConflict = errors.New("central identity conflict")
 	ErrInvalidRecoveryRequest       = errors.New("invalid password recovery request")
 	ErrInvalidCurrentPassword       = errors.New("invalid current password")
 	ErrUnsupportedApplication       = errors.New("unsupported application")
+
+	// ErrPasswordSetupRequired means the central identity exists but has no
+	// auth_credentials row yet (legacy identity). The user must complete the
+	// forgot-password / password-setup flow.
+	ErrPasswordSetupRequired = errors.New("password setup required")
+
+	// ErrResetTokenExpired means a recovery token existed and was unused,
+	// but its TTL elapsed.
+	ErrResetTokenExpired = errors.New("password reset token expired")
 )
 
+// AuthService is the facade over the self-hosted Central SSO services.
+// It has no dependency on Supabase Auth.
 type AuthService struct {
-	supabaseAuthService                *SupabaseAuthService
-	adminService                       *SupabaseAdminService
-	identityService                    *IdentityService
-	userRepository                     *repository.UserRepository
-	klinikContextService               *KlinikContextService
-	applicationContextService          *ApplicationContextService
-	klinikMigrationService             *KlinikMigrationService
-	centralLoginService                *CentralLoginService
-	centralRegistrationService         *CentralRegistrationService
-	centralSessionService              *SessionService
-	centralPasswordChangeService       *CentralPasswordChangeService
-	centralPasswordRecoveryService     *CentralPasswordRecoveryService
-	applicationEnrollmentService       *ApplicationEnrollmentService
-	klinikPasswordRecoveryRedirectURL  string
-	silapetPasswordRecoveryRedirectURL string
+	identityService                *IdentityService
+	applicationContextService      *ApplicationContextService
+	centralLoginService            *CentralLoginService
+	centralRegistrationService     *CentralRegistrationService
+	centralSessionService          *SessionService
+	centralPasswordChangeService   *CentralPasswordChangeService
+	centralPasswordRecoveryService *CentralPasswordRecoveryService
+	applicationEnrollmentService   *ApplicationEnrollmentService
 }
 
 func NewAuthService(
-	supabaseAuthService *SupabaseAuthService,
-	adminService *SupabaseAdminService,
 	identityService *IdentityService,
-	userRepository *repository.UserRepository,
-	klinikContextService *KlinikContextService,
 	applicationContextService *ApplicationContextService,
-	klinikMigrationService *KlinikMigrationService,
-	klinikPasswordRecoveryRedirectURL string,
-	silapetPasswordRecoveryRedirectURL string,
 ) *AuthService {
 	return &AuthService{
-		supabaseAuthService:       supabaseAuthService,
-		adminService:              adminService,
 		identityService:           identityService,
-		userRepository:            userRepository,
-		klinikContextService:      klinikContextService,
 		applicationContextService: applicationContextService,
-		klinikMigrationService:    klinikMigrationService,
-		klinikPasswordRecoveryRedirectURL: strings.TrimSpace(
-			klinikPasswordRecoveryRedirectURL,
-		),
-		silapetPasswordRecoveryRedirectURL: strings.TrimSpace(
-			silapetPasswordRecoveryRedirectURL,
-		),
 	}
 }
 
@@ -161,97 +155,6 @@ func (s *AuthService) RequestPasswordRecovery(
 	)
 }
 
-func (s *AuthService) isSilapetPasswordRecoveryEligible(
-	ctx context.Context,
-	email string,
-) (bool, error) {
-	if s.userRepository == nil ||
-		s.applicationContextService == nil {
-
-		return false, ErrAuthUnavailable
-	}
-
-	user, err := s.userRepository.GetByEmailIncludingDeleted(
-		ctx,
-		email,
-	)
-	if err != nil {
-		return false, err
-	}
-
-	if user == nil || user.DeletedAt != nil {
-		return false, nil
-	}
-
-	appContext, err := s.applicationContextService.GetByAppUserID(
-		ctx,
-		user.ID,
-		models.ApplicationCodeSilapet,
-	)
-	if err != nil {
-		if errors.Is(err, ErrApplicationUnavailable) ||
-			errors.Is(err, ErrApplicationMembershipUnavailable) {
-
-			return false, nil
-		}
-
-		return false, err
-	}
-
-	return appContext.Status == models.MembershipStatusApproved, nil
-}
-
-func (s *AuthService) isKlinikPasswordRecoveryEligible(
-	ctx context.Context,
-	email string,
-) (bool, error) {
-	if s.userRepository == nil ||
-		s.klinikContextService == nil ||
-		s.applicationContextService == nil {
-
-		return false, ErrAuthUnavailable
-	}
-
-	user, err := s.userRepository.GetByEmailIncludingDeleted(ctx, email)
-	if err != nil {
-		return false, err
-	}
-
-	if user == nil || user.DeletedAt != nil {
-		return false, nil
-	}
-
-	appContext, err := s.applicationContextService.GetByAppUserID(
-		ctx,
-		user.ID,
-		models.ApplicationCodeKlinikPKP,
-	)
-	if err != nil {
-		if errors.Is(err, ErrApplicationUnavailable) ||
-			errors.Is(err, ErrApplicationMembershipUnavailable) {
-
-			return false, nil
-		}
-
-		return false, err
-	}
-
-	if appContext.Status != models.MembershipStatusApproved {
-		return false, nil
-	}
-
-	_, err = s.klinikContextService.GetByAppUserID(ctx, user.ID)
-	if err != nil {
-		if errors.Is(err, ErrKlinikAccountUnavailable) {
-			return false, nil
-		}
-
-		return false, err
-	}
-
-	return true, nil
-}
-
 // ChangePassword changes the authenticated user's central credential.
 //
 // Authorization has already been established by RequireAuth. Password
@@ -259,7 +162,6 @@ func (s *AuthService) isKlinikPasswordRecoveryEligible(
 func (s *AuthService) ChangePassword(
 	ctx context.Context,
 	appUserID string,
-	email string,
 	oldPassword string,
 	newPassword string,
 ) error {
@@ -270,7 +172,6 @@ func (s *AuthService) ChangePassword(
 	return s.centralPasswordChangeService.Change(
 		ctx,
 		appUserID,
-		email,
 		oldPassword,
 		newPassword,
 	)
