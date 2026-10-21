@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/nahdukesaba/sso-balai/internal/models"
 )
 
 var (
@@ -36,7 +39,7 @@ func (r *ApplicationEnrollmentRepository) Request(
 	ctx context.Context,
 	appUserID string,
 	applicationCode string,
-) (string, error) {
+) (*models.ApplicationEnrollmentResult, error) {
 	appUserID = strings.TrimSpace(
 		appUserID,
 	)
@@ -48,12 +51,20 @@ func (r *ApplicationEnrollmentRepository) Request(
 	if appUserID == "" ||
 		applicationCode == "" {
 
-		return "", ErrEnrollmentApplicationUnavailable
+		return nil, ErrEnrollmentApplicationUnavailable
 	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin application enrollment: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(context.Background())
+	}()
 
 	var applicationID string
 
-	err := r.pool.QueryRow(
+	err = tx.QueryRow(
 		ctx,
 		`
 		SELECT id
@@ -61,6 +72,7 @@ func (r *ApplicationEnrollmentRepository) Request(
 		WHERE LOWER(code) = LOWER($1)
 		  AND is_active = TRUE
 		LIMIT 1
+		FOR SHARE
 		`,
 		applicationCode,
 	).Scan(
@@ -68,25 +80,21 @@ func (r *ApplicationEnrollmentRepository) Request(
 	)
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrEnrollmentApplicationUnavailable
+		return nil, ErrEnrollmentApplicationUnavailable
 	}
 
 	if err != nil {
-		return "", fmt.Errorf(
+		return nil, fmt.Errorf(
 			"find enrollment application: %w",
 			err,
 		)
 	}
 
-	var status string
-
-	// The unique (app_user_id, application_id) constraint makes this
-	// operation safe when the same request arrives concurrently.
-	//
-	// Existing active memberships keep their current role/status.
-	// A previously soft-deleted membership may be requested again
-	// and returns to the normal pending/user state.
-	err = r.pool.QueryRow(
+	// The unique (app_user_id, application_id) constraint serializes
+	// concurrent first requests. A conflicting request observes the logical
+	// membership in the SELECT FOR UPDATE below instead of inserting a second
+	// row.
+	tag, err := tx.Exec(
 		ctx,
 		`
 		INSERT INTO public.app_memberships (
@@ -105,52 +113,110 @@ func (r *ApplicationEnrollmentRepository) Request(
 			app_user_id,
 			application_id
 		)
-		DO UPDATE SET
-			role = CASE
-				WHEN public.app_memberships.deleted_at
-					IS NOT NULL
-					THEN 'user'
-				ELSE public.app_memberships.role
-			END,
-			status = CASE
-				WHEN public.app_memberships.deleted_at
-					IS NOT NULL
-					THEN 'pending'
-				ELSE public.app_memberships.status
-			END,
-			deleted_at = CASE
-				WHEN public.app_memberships.deleted_at
-					IS NOT NULL
-					THEN NULL
-				ELSE public.app_memberships.deleted_at
-			END,
-			updated_at = NOW()
-		RETURNING status
+		DO NOTHING
 		`,
 		appUserID,
 		applicationID,
-	).Scan(
-		&status,
 	)
-
 	if err != nil {
-		return "", fmt.Errorf(
+		return nil, fmt.Errorf(
 			"request application enrollment: %w",
 			err,
 		)
 	}
 
-	switch status {
-	case "pending", "approved":
-		return status, nil
+	if tag.RowsAffected() == 1 {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit application enrollment: %w", err)
+		}
 
-	case "rejected", "disabled":
-		return "", ErrEnrollmentBlocked
+		return &models.ApplicationEnrollmentResult{
+			Application: applicationCode,
+			Status:      models.MembershipStatusPending,
+			Outcome:     models.ApplicationEnrollmentCreated,
+		}, nil
+	}
+
+	var status string
+	var deletedAt *time.Time
+	err = tx.QueryRow(
+		ctx,
+		`
+		SELECT status, deleted_at
+		FROM public.app_memberships
+		WHERE app_user_id = $1
+		  AND application_id = $2
+		FOR UPDATE
+		`,
+		appUserID,
+		applicationID,
+	).Scan(&status, &deletedAt)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"read existing application enrollment: %w",
+			err,
+		)
+	}
+
+	if deletedAt != nil {
+		_, err = tx.Exec(
+			ctx,
+			`
+			UPDATE public.app_memberships
+			SET role = 'user',
+				status = 'pending',
+				deleted_at = NULL,
+				updated_at = NOW()
+			WHERE app_user_id = $1
+			  AND application_id = $2
+			`,
+			appUserID,
+			applicationID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"reopen application enrollment: %w",
+				err,
+			)
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit application enrollment: %w", err)
+		}
+
+		return &models.ApplicationEnrollmentResult{
+			Application: applicationCode,
+			Status:      models.MembershipStatusPending,
+			Outcome:     models.ApplicationEnrollmentReopened,
+		}, nil
+	}
+
+	var outcome models.ApplicationEnrollmentOutcome
+	switch status {
+	case models.MembershipStatusPending:
+		outcome = models.ApplicationEnrollmentAlreadyPending
+
+	case models.MembershipStatusApproved:
+		outcome = models.ApplicationEnrollmentAlreadyApproved
+
+	case models.MembershipStatusRejected,
+		models.MembershipStatusDisabled:
+		return nil, ErrEnrollmentBlocked
 
 	default:
-		return "", fmt.Errorf(
+		return nil, fmt.Errorf(
 			"unexpected application membership status %q",
 			status,
 		)
 	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit application enrollment: %w", err)
+	}
+
+	return &models.ApplicationEnrollmentResult{
+		Application: applicationCode,
+		Status:      status,
+		Outcome:     outcome,
+	}, nil
 }

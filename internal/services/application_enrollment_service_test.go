@@ -5,13 +5,14 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/nahdukesaba/sso-balai/internal/models"
 	"github.com/nahdukesaba/sso-balai/internal/repository"
 )
 
 type fakeApplicationEnrollmentStore struct {
 	userID      string
 	application string
-	status      string
+	result      *models.ApplicationEnrollmentResult
 	err         error
 }
 
@@ -19,18 +20,22 @@ func (f *fakeApplicationEnrollmentStore) Request(
 	ctx context.Context,
 	appUserID string,
 	applicationCode string,
-) (string, error) {
+) (*models.ApplicationEnrollmentResult, error) {
 	f.userID = appUserID
 	f.application = applicationCode
 
-	return f.status, f.err
+	return f.result, f.err
 }
 
 func TestApplicationEnrollmentCreatesPendingMembership(
 	t *testing.T,
 ) {
 	store := &fakeApplicationEnrollmentStore{
-		status: "pending",
+		result: &models.ApplicationEnrollmentResult{
+			Application: "arsiparis",
+			Status:      models.MembershipStatusPending,
+			Outcome:     models.ApplicationEnrollmentCreated,
+		},
 	}
 
 	service :=
@@ -38,7 +43,7 @@ func TestApplicationEnrollmentCreatesPendingMembership(
 			store,
 		)
 
-	status, err := service.Request(
+	result, err := service.Request(
 		context.Background(),
 		"user-1",
 		" ARSIPARIS ",
@@ -50,10 +55,10 @@ func TestApplicationEnrollmentCreatesPendingMembership(
 		)
 	}
 
-	if status != "pending" {
+	if result.Status != models.MembershipStatusPending {
 		t.Fatalf(
 			"unexpected enrollment status %q",
-			status,
+			result.Status,
 		)
 	}
 
@@ -72,11 +77,15 @@ func TestApplicationEnrollmentAllowsExistingApprovedMembership(
 	service :=
 		NewApplicationEnrollmentService(
 			&fakeApplicationEnrollmentStore{
-				status: "approved",
+				result: &models.ApplicationEnrollmentResult{
+					Application: "silapet",
+					Status:      models.MembershipStatusApproved,
+					Outcome:     models.ApplicationEnrollmentAlreadyApproved,
+				},
 			},
 		)
 
-	status, err := service.Request(
+	result, err := service.Request(
 		context.Background(),
 		"user-1",
 		"silapet",
@@ -88,10 +97,10 @@ func TestApplicationEnrollmentAllowsExistingApprovedMembership(
 		)
 	}
 
-	if status != "approved" {
+	if result.Status != models.MembershipStatusApproved {
 		t.Fatalf(
 			"unexpected status %q",
-			status,
+			result.Status,
 		)
 	}
 }

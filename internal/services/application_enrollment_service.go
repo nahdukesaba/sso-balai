@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/nahdukesaba/sso-balai/internal/models"
 	"github.com/nahdukesaba/sso-balai/internal/repository"
 )
 
@@ -27,7 +28,7 @@ type ApplicationEnrollmentStore interface {
 		ctx context.Context,
 		appUserID string,
 		applicationCode string,
-	) (string, error)
+	) (*models.ApplicationEnrollmentResult, error)
 }
 
 type ApplicationEnrollmentService struct {
@@ -46,7 +47,7 @@ func (s *ApplicationEnrollmentService) Request(
 	ctx context.Context,
 	appUserID string,
 	applicationCode string,
-) (string, error) {
+) (*models.ApplicationEnrollmentResult, error) {
 	appUserID = strings.TrimSpace(
 		appUserID,
 	)
@@ -58,14 +59,14 @@ func (s *ApplicationEnrollmentService) Request(
 	if appUserID == "" ||
 		applicationCode == "" {
 
-		return "", ErrInvalidApplicationEnrollment
+		return nil, ErrInvalidApplicationEnrollment
 	}
 
 	if s.store == nil {
-		return "", ErrAuthUnavailable
+		return nil, ErrAuthUnavailable
 	}
 
-	status, err := s.store.Request(
+	result, err := s.store.Request(
 		ctx,
 		appUserID,
 		applicationCode,
@@ -76,20 +77,24 @@ func (s *ApplicationEnrollmentService) Request(
 			err,
 			repository.ErrEnrollmentApplicationUnavailable,
 		):
-			return "",
+			return nil,
 				ErrApplicationEnrollmentUnavailable
 
 		case errors.Is(
 			err,
 			repository.ErrEnrollmentBlocked,
 		):
-			return "",
+			return nil,
 				ErrApplicationEnrollmentBlocked
 
 		default:
-			return "", err
+			return nil, err
 		}
 	}
 
-	return status, nil
+	if result == nil || strings.TrimSpace(result.Status) == "" {
+		return nil, ErrAuthUnavailable
+	}
+
+	return result, nil
 }

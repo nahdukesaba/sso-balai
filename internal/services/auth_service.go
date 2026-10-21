@@ -34,9 +34,19 @@ type AuthService struct {
 	centralPasswordChangeService   *CentralPasswordChangeService
 	centralPasswordRecoveryService *CentralPasswordRecoveryService
 	applicationEnrollmentService   *ApplicationEnrollmentService
+	requestAccessService           RequestAccessEnrollment
 	activeAuthenticationService    ActiveAuthenticationService
 	passwordRecoveryService        PasswordRecoveryService
 	registrationService            RegistrationService
+}
+
+type RequestAccessEnrollment interface {
+	Request(
+		ctx context.Context,
+		email string,
+		password string,
+		applicationCode string,
+	) (*models.ApplicationEnrollmentResult, error)
 }
 
 func NewAuthService(
@@ -93,6 +103,12 @@ func (s *AuthService) SetApplicationEnrollmentService(
 	service *ApplicationEnrollmentService,
 ) {
 	s.applicationEnrollmentService = service
+}
+
+func (s *AuthService) SetRequestAccessService(
+	service RequestAccessEnrollment,
+) {
+	s.requestAccessService = service
 }
 
 func (s *AuthService) SetActiveAuthenticationService(
@@ -332,11 +348,45 @@ func (s *AuthService) EnrollApplication(
 		return "", ErrInvalidToken
 	}
 
-	return s.applicationEnrollmentService.Request(
+	result, err := s.applicationEnrollmentService.Request(
 		ctx,
 		identity.User.ID,
 		applicationCode,
 	)
+	if err != nil {
+		return "", err
+	}
+	if result == nil {
+		return "", ErrAuthUnavailable
+	}
+
+	return result.Status, nil
+}
+
+func (s *AuthService) RequestAccess(
+	ctx context.Context,
+	email string,
+	password string,
+	applicationCode string,
+) (*models.ApplicationEnrollmentResult, error) {
+	if s.requestAccessService == nil {
+		return nil, ErrAuthUnavailable
+	}
+
+	result, err := s.requestAccessService.Request(
+		ctx,
+		email,
+		password,
+		applicationCode,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, ErrAuthUnavailable
+	}
+
+	return result, nil
 }
 
 func (s *AuthService) Refresh(

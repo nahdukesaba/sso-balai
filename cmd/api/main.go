@@ -126,6 +126,13 @@ func main() {
 			applicationEnrollmentRepository,
 		)
 
+	requestAccessService :=
+		services.NewCentralRequestAccessService(
+			supabaseAuthService,
+			userRepository,
+			applicationEnrollmentService,
+		)
+
 	authService := services.NewAuthService(
 		supabaseAuthService,
 		supabaseAdminService,
@@ -150,6 +157,10 @@ func main() {
 
 	authService.SetApplicationEnrollmentService(
 		applicationEnrollmentService,
+	)
+
+	authService.SetRequestAccessService(
+		requestAccessService,
 	)
 
 	authHandler := handlers.NewAuthHandler(

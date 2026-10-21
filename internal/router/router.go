@@ -22,6 +22,7 @@ func Register(
 	auth.Post("/register", authHandler.Register)
 	auth.Post("/forgot-password", authHandler.ForgotPassword)
 	auth.Post("/reset-password", authHandler.ResetPassword)
+	auth.Post("/request-access", authHandler.RequestAccess)
 	auth.Post("/refresh", authHandler.Refresh)
 	auth.Post("/logout", authHandler.Logout)
 	auth.Put("/password", authMiddleware.RequireAuth, authHandler.ChangePassword)

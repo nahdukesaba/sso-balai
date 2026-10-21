@@ -63,6 +63,12 @@ type applicationEnrollmentRequest struct {
 	Application string `json:"application"`
 }
 
+type requestAccessRequest struct {
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	Application string `json:"application"`
+}
+
 type changePasswordRequest struct {
 	OldPassword string `json:"oldPassword"`
 	NewPassword string `json:"newPassword"`
@@ -421,6 +427,48 @@ func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
+func (h *AuthHandler) RequestAccess(c *fiber.Ctx) error {
+	var request requestAccessRequest
+
+	if err := c.BodyParser(&request); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "invalid_request",
+			"message": "Payload permintaan tidak valid.",
+		})
+	}
+
+	request.Email = strings.ToLower(strings.TrimSpace(request.Email))
+	request.Application = strings.ToLower(
+		strings.TrimSpace(request.Application),
+	)
+
+	if request.Email == "" || request.Password == "" ||
+		request.Application == "" {
+
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "validation_error",
+			"message": "Email, password, dan aplikasi wajib diisi.",
+		})
+	}
+
+	result, err := h.authService.RequestAccess(
+		c.UserContext(),
+		request.Email,
+		request.Password,
+		request.Application,
+	)
+	if err != nil {
+		return handleRequestAccessError(c, err)
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"message":     "Permintaan akses berhasil dikirim.",
+		"application": result.Application,
+		"status":      result.Status,
+		"created":     result.CreatedPendingRequest(),
+	})
+}
+
 func (h *AuthHandler) EnrollApplication(
 	c *fiber.Ctx,
 ) error {
@@ -551,6 +599,58 @@ func (h *AuthHandler) EnrollApplication(
 		"application": request.Application,
 		"status":      status,
 	})
+}
+
+func handleRequestAccessError(c *fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, services.ErrInvalidCredentials):
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error":   "invalid_credentials",
+			"message": "Email atau password salah.",
+		})
+
+	case errors.Is(err, services.ErrInvalidApplicationEnrollment):
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "invalid_application",
+			"message": "Permintaan akses aplikasi tidak valid.",
+		})
+
+	case errors.Is(err, services.ErrApplicationEnrollmentUnavailable):
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error":   "application_unavailable",
+			"message": "Aplikasi tidak tersedia.",
+		})
+
+	case errors.Is(err, services.ErrApplicationAccessAlreadyGranted):
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error":   "application_access_exists",
+			"message": "Akun sudah memiliki akses ke aplikasi ini.",
+		})
+
+	case errors.Is(err, services.ErrApplicationEnrollmentBlocked):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":   "application_access_blocked",
+			"message": "Akses ke aplikasi ini tidak dapat diajukan.",
+		})
+
+	case errors.Is(err, services.ErrAuthRateLimited):
+		return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+			"error":   "rate_limited",
+			"message": "Terlalu banyak percobaan autentikasi. Coba kembali nanti.",
+		})
+
+	case errors.Is(err, services.ErrAuthUnavailable):
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error":   "auth_unavailable",
+			"message": "Layanan autentikasi sedang tidak tersedia.",
+		})
+
+	default:
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":   "internal_error",
+			"message": "Gagal memproses permintaan akses aplikasi.",
+		})
+	}
 }
 
 func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
