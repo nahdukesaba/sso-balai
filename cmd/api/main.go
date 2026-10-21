@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -73,30 +72,6 @@ func main() {
 			centralRegistrationRepository,
 		)
 
-	accessTokenService, err := services.NewAccessTokenService(
-		cfg.AuthAccessTokenSecret,
-		"sso-balai",
-		15*time.Minute,
-	)
-	if err != nil {
-		log.Fatalf(
-			"failed to initialize central access token service: %v",
-			err,
-		)
-	}
-
-	sessionService, err := services.NewSessionService(
-		sessionRepository,
-		accessTokenService,
-		7*24*time.Hour,
-	)
-	if err != nil {
-		log.Fatalf(
-			"failed to initialize central session service: %v",
-			err,
-		)
-	}
-
 	supabaseAuthService, err := services.NewSupabaseAuthService(
 		cfg.SupabaseURL,
 		cfg.SupabasePublicKey,
@@ -105,14 +80,13 @@ func main() {
 		log.Fatalf("failed to initialize Supabase authentication: %v", err)
 	}
 
-	centralLoginService := services.NewCentralLoginService(
-		userRepository,
-		credentialService,
-		applicationContextService,
-		sessionService,
-		identityService,
-		supabaseAuthService,
-	)
+	activeAuthenticationService :=
+		services.NewSupabaseCentralAuthService(
+			supabaseAuthService,
+			userRepository,
+			applicationContextService,
+			identityService,
+		)
 
 	supabaseAdminService, err := services.NewSupabaseAdminService(
 		cfg.SupabaseURL,
@@ -136,13 +110,6 @@ func main() {
 		pegawaiRepository,
 		klinikUserRepository,
 	)
-
-	centralPasswordChangeService :=
-		services.NewCentralPasswordChangeService(
-			credentialService,
-			supabaseAuthService,
-			sessionRepository,
-		)
 
 	resendRecoveryMailer, err :=
 		services.NewResendRecoveryMailer(
@@ -189,20 +156,12 @@ func main() {
 		cfg.SilapetPasswordRecoveryRedirectURL,
 	)
 
-	authService.SetCentralLoginService(
-		centralLoginService,
-	)
-
 	authService.SetCentralRegistrationService(
 		centralRegistrationService,
 	)
 
-	authService.SetCentralSessionService(
-		sessionService,
-	)
-
-	authService.SetCentralPasswordChangeService(
-		centralPasswordChangeService,
+	authService.SetActiveAuthenticationService(
+		activeAuthenticationService,
 	)
 
 	authService.SetCentralPasswordRecoveryService(

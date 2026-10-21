@@ -34,6 +34,7 @@ type AuthService struct {
 	centralPasswordChangeService       *CentralPasswordChangeService
 	centralPasswordRecoveryService     *CentralPasswordRecoveryService
 	applicationEnrollmentService       *ApplicationEnrollmentService
+	activeAuthenticationService        ActiveAuthenticationService
 	klinikPasswordRecoveryRedirectURL  string
 	silapetPasswordRecoveryRedirectURL string
 }
@@ -102,6 +103,12 @@ func (s *AuthService) SetApplicationEnrollmentService(
 	s.applicationEnrollmentService = service
 }
 
+func (s *AuthService) SetActiveAuthenticationService(
+	service ActiveAuthenticationService,
+) {
+	s.activeAuthenticationService = service
+}
+
 // RegisterCentralIdentity creates a central self-hosted identity
 // together with its initial application membership.
 //
@@ -135,11 +142,11 @@ func (s *AuthService) Login(
 	password string,
 	application string,
 ) (*models.LoginResult, error) {
-	if s.centralLoginService == nil {
+	if s.activeAuthenticationService == nil {
 		return nil, ErrAuthUnavailable
 	}
 
-	return s.centralLoginService.Login(
+	return s.activeAuthenticationService.Login(
 		ctx,
 		email,
 		password,
@@ -252,10 +259,8 @@ func (s *AuthService) isKlinikPasswordRecoveryEligible(
 	return true, nil
 }
 
-// ChangePassword changes the authenticated user's central credential.
-//
-// Authorization has already been established by RequireAuth. Password
-// verification and the resulting credential update are owned by Central SSO.
+// ChangePassword verifies and updates the authenticated user's Supabase
+// credential. Authorization has already been established by RequireAuth.
 func (s *AuthService) ChangePassword(
 	ctx context.Context,
 	appUserID string,
@@ -263,11 +268,11 @@ func (s *AuthService) ChangePassword(
 	oldPassword string,
 	newPassword string,
 ) error {
-	if s.centralPasswordChangeService == nil {
+	if s.activeAuthenticationService == nil {
 		return ErrAuthUnavailable
 	}
 
-	return s.centralPasswordChangeService.Change(
+	return s.activeAuthenticationService.ChangePassword(
 		ctx,
 		appUserID,
 		email,
@@ -337,231 +342,35 @@ func (s *AuthService) Refresh(
 	ctx context.Context,
 	refreshToken string,
 ) (*models.LoginResult, error) {
-	refreshToken = strings.TrimSpace(
-		refreshToken,
-	)
-
-	if refreshToken == "" {
-		return nil, ErrInvalidToken
-	}
-
-	applicationCode, isCentral :=
-		centralRefreshTokenApplication(
-			refreshToken,
-		)
-
-	// Supabase refresh tokens are no longer an SSO session authority.
-	if !isCentral {
-		return nil, ErrInvalidToken
-	}
-
-	if s.centralSessionService == nil ||
-		s.applicationContextService == nil {
-
+	if s.activeAuthenticationService == nil {
 		return nil, ErrAuthUnavailable
 	}
 
-	centralSession, err :=
-		s.centralSessionService.ResolveRefreshToken(
-			ctx,
-			refreshToken,
-		)
-	if err != nil {
-		if errors.Is(
-			err,
-			ErrInvalidRefreshToken,
-		) {
-			return nil, ErrInvalidToken
-		}
-
-		return nil, err
-	}
-
-	appContext, err :=
-		s.applicationContextService.GetByAppUserID(
-			ctx,
-			centralSession.AppUserID,
-			applicationCode,
-		)
-	if err != nil {
-		if errors.Is(
-			err,
-			ErrApplicationMembershipUnavailable,
-		) {
-			return nil, ErrAccountUnavailable
-		}
-
-		return nil, err
-	}
-
-	if appContext == nil {
-		return nil, ErrAccountUnavailable
-	}
-
-	if err := membershipLoginStatusError(
-		appContext.Status,
-	); err != nil {
-		return nil, err
-	}
-
-	tokenSet, _, err :=
-		s.centralSessionService.Rotate(
-			ctx,
-			centralSession,
-			refreshToken,
-			applicationCode,
-			appContext.Role,
-		)
-	if err != nil {
-		if errors.Is(
-			err,
-			ErrInvalidRefreshToken,
-		) {
-			return nil, ErrInvalidToken
-		}
-
-		return nil, err
-	}
-
-	identity, err :=
-		s.loadCentralIdentity(
-			ctx,
-			centralSession.AppUserID,
-		)
-	if err != nil {
-		return nil, err
-	}
-
-	return &models.LoginResult{
-		Session: &models.SupabaseSession{
-			AccessToken:  tokenSet.AccessToken,
-			RefreshToken: tokenSet.RefreshToken,
-			TokenType:    tokenSet.TokenType,
-			ExpiresIn:    tokenSet.ExpiresIn,
-			ExpiresAt:    tokenSet.ExpiresAt,
-			User: models.SupabaseAuthUser{
-				ID:    identity.User.ID,
-				Email: identity.User.Email,
-			},
-		},
-		Identity: identity,
-	}, nil
+	return s.activeAuthenticationService.Refresh(ctx, refreshToken)
 }
 
 func (s *AuthService) Logout(
 	ctx context.Context,
 	accessToken string,
 ) error {
-	accessToken = strings.TrimSpace(
-		accessToken,
-	)
-
-	if accessToken == "" {
-		return ErrInvalidToken
-	}
-
-	if s.centralSessionService == nil {
+	if s.activeAuthenticationService == nil {
 		return ErrAuthUnavailable
 	}
 
-	err := s.centralSessionService.RevokeAccessToken(
-		ctx,
-		accessToken,
-	)
-	if err != nil {
-		if errors.Is(
-			err,
-			ErrInvalidAccessToken,
-		) {
-			return ErrInvalidToken
-		}
-
-		return err
-	}
-
-	return nil
+	return s.activeAuthenticationService.Logout(ctx, accessToken)
 }
 
 func (s *AuthService) AuthenticateAccessToken(
 	ctx context.Context,
 	accessToken string,
 ) (*models.Identity, error) {
-	accessToken = strings.TrimSpace(
-		accessToken,
-	)
-
-	if accessToken == "" {
-		return nil, ErrInvalidToken
-	}
-
-	if s.centralSessionService == nil ||
-		s.applicationContextService == nil {
-
+	if s.activeAuthenticationService == nil {
 		return nil, ErrAuthUnavailable
 	}
 
-	claims, centralSession, err :=
-		s.centralSessionService.ValidateAccessToken(
-			ctx,
-			accessToken,
-		)
-	if err != nil {
-		if errors.Is(
-			err,
-			ErrInvalidAccessToken,
-		) {
-			return nil, ErrInvalidToken
-		}
-
-		return nil, err
-	}
-
-	if claims == nil ||
-		centralSession == nil {
-
-		return nil, ErrInvalidToken
-	}
-
-	appContext, err :=
-		s.applicationContextService.GetByAppUserID(
-			ctx,
-			centralSession.AppUserID,
-			claims.Application(),
-		)
-	if err != nil {
-		if errors.Is(
-			err,
-			ErrApplicationMembershipUnavailable,
-		) {
-			return nil, ErrAccountUnavailable
-		}
-
-		return nil, err
-	}
-
-	if appContext == nil {
-		return nil, ErrAccountUnavailable
-	}
-
-	if err := membershipLoginStatusError(
-		appContext.Status,
-	); err != nil {
-		return nil, err
-	}
-
-	// Authorization changes must take effect immediately.
-	// A stale role requires the client to authenticate/refresh again.
-	if strings.TrimSpace(
-		appContext.Role,
-	) != strings.TrimSpace(
-		claims.Role,
-	) {
-		return nil, ErrInvalidToken
-	}
-
-	return s.loadCentralIdentity(
+	return s.activeAuthenticationService.AuthenticateAccessToken(
 		ctx,
-		centralSession.AppUserID,
+		accessToken,
 	)
 }
 

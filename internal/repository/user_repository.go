@@ -23,6 +23,7 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 
 const userColumns = `
 	id,
+	auth_user_id,
 	email,
 	full_name,
 	role,
@@ -38,6 +39,7 @@ func scanUser(row pgx.Row) (*models.AppUser, error) {
 
 	err := row.Scan(
 		&user.ID,
+		&user.AuthUserID,
 		&user.Email,
 		&user.FullName,
 		&user.Role,
@@ -52,6 +54,37 @@ func scanUser(row pgx.Row) (*models.AppUser, error) {
 	}
 
 	return &user, nil
+}
+
+func (r *UserRepository) GetByAuthUserID(
+	ctx context.Context,
+	authUserID string,
+) (*models.AppUser, error) {
+	row := r.pool.QueryRow(
+		ctx,
+		`
+		SELECT `+userColumns+`
+		FROM public.app_users
+		WHERE auth_user_id = $1
+		  AND deleted_at IS NULL
+		LIMIT 1
+		`,
+		authUserID,
+	)
+
+	user, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf(
+			"get app user by auth user id: %w",
+			err,
+		)
+	}
+
+	return user, nil
 }
 
 func (r *UserRepository) GetByID(
