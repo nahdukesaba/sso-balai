@@ -76,14 +76,6 @@ func main() {
 		log.Fatalf("failed to initialize Supabase authentication: %v", err)
 	}
 
-	activeAuthenticationService :=
-		services.NewSupabaseCentralAuthService(
-			supabaseAuthService,
-			userRepository,
-			applicationContextService,
-			identityService,
-		)
-
 	passwordRecoveryService, err :=
 		services.NewSupabasePasswordRecoveryService(
 			supabaseAuthService,
@@ -106,6 +98,16 @@ func main() {
 			err,
 		)
 	}
+
+	activeAuthenticationService :=
+		services.NewSupabaseCentralAuthService(
+			supabaseAuthService,
+			userRepository,
+			applicationContextService,
+			identityService,
+			credentialService,
+			supabaseAdminService,
+		)
 
 	klinikCredentialService := services.NewKlinikCredentialService(
 		klinikUserRepository,

@@ -87,10 +87,19 @@ func (f *fakeSupabaseAuthentication) UpdatePassword(
 }
 
 type fakeSupabaseAuthUsers struct {
-	user        *models.AppUser
-	err         error
-	authUserID  string
-	lookupCalls int
+	user               *models.AppUser
+	err                error
+	emailErr           error
+	idErr              error
+	linkErr            error
+	forceLinkConflict  bool
+	conflictAuthUserID string
+	authUserID         string
+	linkedAuthUserID   string
+	lookupCalls        int
+	emailLookupCalls   int
+	idLookupCalls      int
+	linkCalls          int
 }
 
 func (f *fakeSupabaseAuthUsers) GetByAuthUserID(
@@ -101,6 +110,54 @@ func (f *fakeSupabaseAuthUsers) GetByAuthUserID(
 	f.authUserID = authUserID
 
 	return f.user, f.err
+}
+
+func (f *fakeSupabaseAuthUsers) GetByEmailIncludingDeleted(
+	_ context.Context,
+	_ string,
+) (*models.AppUser, error) {
+	f.emailLookupCalls++
+
+	return f.user, f.emailErr
+}
+
+func (f *fakeSupabaseAuthUsers) GetByIDIncludingDeleted(
+	_ context.Context,
+	_ string,
+) (*models.AppUser, error) {
+	f.idLookupCalls++
+
+	return f.user, f.idErr
+}
+
+func (f *fakeSupabaseAuthUsers) LinkAuthUserIDIfUnset(
+	_ context.Context,
+	_ string,
+	authUserID string,
+) (bool, error) {
+	f.linkCalls++
+	f.linkedAuthUserID = authUserID
+
+	if f.linkErr != nil {
+		return false, f.linkErr
+	}
+
+	if f.forceLinkConflict ||
+		f.user == nil ||
+		f.user.AuthUserID != nil {
+		if f.forceLinkConflict &&
+			f.user != nil &&
+			f.conflictAuthUserID != "" {
+
+			f.user.AuthUserID = &f.conflictAuthUserID
+		}
+
+		return false, nil
+	}
+
+	f.user.AuthUserID = &f.linkedAuthUserID
+
+	return true, nil
 }
 
 type fakeSupabaseAuthApplications struct {
@@ -128,6 +185,94 @@ type fakeSupabaseAuthIdentities struct {
 	err       error
 	userID    string
 	loadCalls int
+}
+
+type fakeLegacyPasswordVerifier struct {
+	password string
+	err      error
+	calls    int
+	userID   string
+	provided string
+}
+
+func (f *fakeLegacyPasswordVerifier) VerifyUserPassword(
+	_ context.Context,
+	appUserID string,
+	password string,
+) (*models.AuthCredential, error) {
+	f.calls++
+	f.userID = appUserID
+	f.provided = password
+
+	if f.err != nil {
+		return nil, f.err
+	}
+
+	if password != f.password {
+		return nil, ErrInvalidCredentials
+	}
+
+	return &models.AuthCredential{AppUserID: appUserID}, nil
+}
+
+type fakeLegacyMigrationAdmin struct {
+	findResults []*models.SupabaseAuthUser
+	findErrors  []error
+	createdUser *models.SupabaseAuthUser
+	createErr   error
+	deleteErr   error
+
+	findCalls       int
+	createCalls     int
+	deleteCalls     int
+	createdEmail    string
+	createdPassword string
+	createdFullName string
+	deletedUserID   string
+}
+
+func (f *fakeLegacyMigrationAdmin) FindUserByEmail(
+	_ context.Context,
+	_ string,
+) (*models.SupabaseAuthUser, error) {
+	index := f.findCalls
+	f.findCalls++
+
+	var result *models.SupabaseAuthUser
+	if index < len(f.findResults) {
+		result = f.findResults[index]
+	}
+
+	var err error
+	if index < len(f.findErrors) {
+		err = f.findErrors[index]
+	}
+
+	return result, err
+}
+
+func (f *fakeLegacyMigrationAdmin) CreateUser(
+	_ context.Context,
+	email string,
+	password string,
+	fullName string,
+) (*models.SupabaseAuthUser, error) {
+	f.createCalls++
+	f.createdEmail = email
+	f.createdPassword = password
+	f.createdFullName = fullName
+
+	return f.createdUser, f.createErr
+}
+
+func (f *fakeLegacyMigrationAdmin) DeleteUser(
+	_ context.Context,
+	userID string,
+) error {
+	f.deleteCalls++
+	f.deletedUserID = userID
+
+	return f.deleteErr
 }
 
 func (f *fakeSupabaseAuthIdentities) GetByUserID(
@@ -163,6 +308,8 @@ func newSupabaseAuthFacade(
 		users,
 		applications,
 		identities,
+		nil,
+		nil,
 	)
 
 	return &AuthService{
@@ -236,7 +383,46 @@ func TestSupabaseLoginSuccess(t *testing.T) {
 	}
 }
 
+func TestMappedLoginFailureDoesNotUseLegacyFallback(t *testing.T) {
+	user, identity := mappedSupabaseUser()
+	auth := &fakeSupabaseAuthentication{
+		signInErr: ErrInvalidCredentials,
+	}
+	credentials := &fakeLegacyPasswordVerifier{
+		password: "Password123!",
+	}
+	admin := &fakeLegacyMigrationAdmin{}
+	service := newLegacyMigrationFacade(
+		auth,
+		&fakeSupabaseAuthUsers{user: user},
+		&fakeSupabaseAuthApplications{},
+		&fakeSupabaseAuthIdentities{identity: identity},
+		credentials,
+		admin,
+	)
+
+	_, err := service.Login(
+		context.Background(),
+		user.Email,
+		"WrongPassword!",
+		models.ApplicationCodeSilapet,
+	)
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected invalid credentials, got %v", err)
+	}
+
+	if credentials.calls != 0 || admin.createCalls != 0 {
+		t.Fatal("mapped user fell back to the legacy migration path")
+	}
+}
+
 func TestSupabaseLoginRejectsUnknownAuthUserID(t *testing.T) {
+	knownAuthUserID := "known-auth-user"
+	user := &models.AppUser{
+		ID:         "app-user-1",
+		AuthUserID: &knownAuthUserID,
+		Email:      "user@example.com",
+	}
 	auth := &fakeSupabaseAuthentication{
 		signInSession: &models.SupabaseSession{
 			AccessToken: "supabase-access",
@@ -247,7 +433,7 @@ func TestSupabaseLoginRejectsUnknownAuthUserID(t *testing.T) {
 	}
 	service := newSupabaseAuthFacade(
 		auth,
-		&fakeSupabaseAuthUsers{},
+		&fakeSupabaseAuthUsers{user: user},
 		&fakeSupabaseAuthApplications{},
 		&fakeSupabaseAuthIdentities{},
 	)
@@ -457,5 +643,407 @@ func TestSupabaseChangePassword(t *testing.T) {
 		auth.signOutToken != "password-session-access" {
 
 		t.Fatal("temporary password verification session was not signed out")
+	}
+}
+
+func legacySupabaseUser() (*models.AppUser, *models.Identity) {
+	user := &models.AppUser{
+		ID:       "legacy-app-user-1",
+		Email:    "legacy@example.com",
+		FullName: "Legacy User",
+		Status:   models.UserStatusApproved,
+	}
+
+	return user, &models.Identity{User: user}
+}
+
+func newLegacyMigrationFacade(
+	auth SupabaseAuthentication,
+	users SupabaseAuthUserStore,
+	applications SupabaseAuthApplicationResolver,
+	identities SupabaseAuthIdentityLoader,
+	credentials LegacyPasswordVerifier,
+	admin LegacyMigrationAdmin,
+) *AuthService {
+	active := NewSupabaseCentralAuthService(
+		auth,
+		users,
+		applications,
+		identities,
+		credentials,
+		admin,
+	)
+
+	return &AuthService{activeAuthenticationService: active}
+}
+
+func approvedLegacyApplication() *fakeSupabaseAuthApplications {
+	return &fakeSupabaseAuthApplications{
+		context: &models.ApplicationContext{
+			ApplicationID: "silapet-application-id",
+			Application:   models.ApplicationCodeSilapet,
+			Role:          "user",
+			Status:        models.MembershipStatusApproved,
+		},
+	}
+}
+
+func TestLegacyLoginMigratesWithVerifiedPassword(t *testing.T) {
+	user, identity := legacySupabaseUser()
+	createdAuthUser := &models.SupabaseAuthUser{
+		ID:    "migrated-auth-user-id",
+		Email: user.Email,
+	}
+	auth := &fakeSupabaseAuthentication{
+		signInSession: &models.SupabaseSession{
+			AccessToken:  "supabase-access",
+			RefreshToken: "supabase-refresh",
+			TokenType:    "bearer",
+			User: models.SupabaseAuthUser{
+				ID:    createdAuthUser.ID,
+				Email: user.Email,
+			},
+		},
+	}
+	users := &fakeSupabaseAuthUsers{user: user}
+	credentials := &fakeLegacyPasswordVerifier{
+		password: "OldPassword123!",
+	}
+	admin := &fakeLegacyMigrationAdmin{
+		findResults: []*models.SupabaseAuthUser{nil},
+		createdUser: createdAuthUser,
+	}
+	service := newLegacyMigrationFacade(
+		auth,
+		users,
+		approvedLegacyApplication(),
+		&fakeSupabaseAuthIdentities{identity: identity},
+		credentials,
+		admin,
+	)
+
+	result, err := service.Login(
+		context.Background(),
+		" Legacy@Example.com ",
+		"OldPassword123!",
+		" SILAPET ",
+	)
+	if err != nil {
+		t.Fatalf("legacy login migration returned error: %v", err)
+	}
+
+	if credentials.calls != 1 ||
+		credentials.provided != "OldPassword123!" {
+
+		t.Fatal("legacy password was not verified before migration")
+	}
+
+	if admin.createCalls != 1 ||
+		admin.createdPassword != "OldPassword123!" {
+
+		t.Fatal("Supabase user was not created with the verified password")
+	}
+
+	if users.linkCalls != 1 ||
+		users.linkedAuthUserID != createdAuthUser.ID {
+
+		t.Fatal("new Supabase identity was not linked conditionally")
+	}
+
+	if auth.signInCalls != 1 ||
+		auth.signInPassword != "OldPassword123!" {
+
+		t.Fatal("successful migration did not sign in through Supabase")
+	}
+
+	if result == nil || result.Session != auth.signInSession ||
+		result.Identity == nil || result.Identity.User.ID != user.ID {
+
+		t.Fatal("migrated login response is not Supabase-session compatible")
+	}
+}
+
+func TestLegacyLoginWrongPasswordDoesNotCreateIdentity(t *testing.T) {
+	user, identity := legacySupabaseUser()
+	auth := &fakeSupabaseAuthentication{}
+	users := &fakeSupabaseAuthUsers{user: user}
+	credentials := &fakeLegacyPasswordVerifier{
+		password: "OldPassword123!",
+	}
+	admin := &fakeLegacyMigrationAdmin{}
+	service := newLegacyMigrationFacade(
+		auth,
+		users,
+		approvedLegacyApplication(),
+		&fakeSupabaseAuthIdentities{identity: identity},
+		credentials,
+		admin,
+	)
+
+	_, err := service.Login(
+		context.Background(),
+		user.Email,
+		"WrongPassword!",
+		models.ApplicationCodeSilapet,
+	)
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected invalid credentials, got %v", err)
+	}
+
+	if admin.createCalls != 0 || users.linkCalls != 0 || auth.signInCalls != 0 {
+		t.Fatal("wrong password caused legacy migration side effects")
+	}
+}
+
+func TestRejectedLegacyLoginIsDeniedBeforeMigration(t *testing.T) {
+	user, identity := legacySupabaseUser()
+	credentials := &fakeLegacyPasswordVerifier{
+		password: "OldPassword123!",
+	}
+	admin := &fakeLegacyMigrationAdmin{}
+	applications := approvedLegacyApplication()
+	applications.context.Status = models.MembershipStatusRejected
+	service := newLegacyMigrationFacade(
+		&fakeSupabaseAuthentication{},
+		&fakeSupabaseAuthUsers{user: user},
+		applications,
+		&fakeSupabaseAuthIdentities{identity: identity},
+		credentials,
+		admin,
+	)
+
+	_, err := service.Login(
+		context.Background(),
+		user.Email,
+		"OldPassword123!",
+		models.ApplicationCodeSilapet,
+	)
+	if !errors.Is(err, ErrAccountRejected) {
+		t.Fatalf("expected rejected account, got %v", err)
+	}
+
+	if credentials.calls != 0 || admin.createCalls != 0 {
+		t.Fatal("rejected user reached password verification or migration")
+	}
+}
+
+func TestLegacyLoginCreateFailureDoesNotLinkMapping(t *testing.T) {
+	user, identity := legacySupabaseUser()
+	users := &fakeSupabaseAuthUsers{user: user}
+	admin := &fakeLegacyMigrationAdmin{
+		findResults: []*models.SupabaseAuthUser{nil, nil},
+		createdUser: nil,
+		createErr:   errors.New("create failed"),
+	}
+	service := newLegacyMigrationFacade(
+		&fakeSupabaseAuthentication{},
+		users,
+		approvedLegacyApplication(),
+		&fakeSupabaseAuthIdentities{identity: identity},
+		&fakeLegacyPasswordVerifier{password: "OldPassword123!"},
+		admin,
+	)
+
+	_, err := service.Login(
+		context.Background(),
+		user.Email,
+		"OldPassword123!",
+		models.ApplicationCodeSilapet,
+	)
+	if !errors.Is(err, ErrAuthUnavailable) {
+		t.Fatalf("expected auth unavailable, got %v", err)
+	}
+
+	if users.linkCalls != 0 || user.AuthUserID != nil {
+		t.Fatal("failed Supabase create changed the identity mapping")
+	}
+}
+
+func TestLegacyLoginLinkFailureDeletesCreatedIdentity(t *testing.T) {
+	user, identity := legacySupabaseUser()
+	createdAuthUser := &models.SupabaseAuthUser{
+		ID:    "created-auth-user-id",
+		Email: user.Email,
+	}
+	users := &fakeSupabaseAuthUsers{
+		user:    user,
+		linkErr: errors.New("database link failed"),
+	}
+	admin := &fakeLegacyMigrationAdmin{
+		findResults: []*models.SupabaseAuthUser{nil},
+		createdUser: createdAuthUser,
+	}
+	service := newLegacyMigrationFacade(
+		&fakeSupabaseAuthentication{},
+		users,
+		approvedLegacyApplication(),
+		&fakeSupabaseAuthIdentities{identity: identity},
+		&fakeLegacyPasswordVerifier{password: "OldPassword123!"},
+		admin,
+	)
+
+	_, err := service.Login(
+		context.Background(),
+		user.Email,
+		"OldPassword123!",
+		models.ApplicationCodeSilapet,
+	)
+	if !errors.Is(err, ErrAuthUnavailable) {
+		t.Fatalf("expected auth unavailable, got %v", err)
+	}
+
+	if admin.deleteCalls != 1 ||
+		admin.deletedUserID != createdAuthUser.ID {
+
+		t.Fatal("link failure did not delete the newly created auth identity")
+	}
+
+	if user.AuthUserID != nil {
+		t.Fatal("link failure changed the legacy user mapping")
+	}
+}
+
+func TestLegacyLoginConcurrentLinkDoesNotOverwriteMapping(t *testing.T) {
+	user, identity := legacySupabaseUser()
+	concurrentAuthUser := &models.SupabaseAuthUser{
+		ID:    "concurrent-auth-user-id",
+		Email: user.Email,
+	}
+	auth := &fakeSupabaseAuthentication{
+		signInSession: &models.SupabaseSession{
+			AccessToken: "supabase-access",
+			User: models.SupabaseAuthUser{
+				ID: concurrentAuthUser.ID,
+			},
+		},
+	}
+	users := &fakeSupabaseAuthUsers{
+		user:               user,
+		forceLinkConflict:  true,
+		conflictAuthUserID: concurrentAuthUser.ID,
+	}
+	admin := &fakeLegacyMigrationAdmin{
+		findResults: []*models.SupabaseAuthUser{concurrentAuthUser},
+	}
+	service := newLegacyMigrationFacade(
+		auth,
+		users,
+		approvedLegacyApplication(),
+		&fakeSupabaseAuthIdentities{identity: identity},
+		&fakeLegacyPasswordVerifier{password: "OldPassword123!"},
+		admin,
+	)
+
+	result, err := service.Login(
+		context.Background(),
+		user.Email,
+		"OldPassword123!",
+		models.ApplicationCodeSilapet,
+	)
+	if err != nil {
+		t.Fatalf("concurrent migration returned error: %v", err)
+	}
+
+	if result == nil || result.Session != auth.signInSession {
+		t.Fatal("concurrent migration did not complete with Supabase session")
+	}
+
+	if user.AuthUserID == nil ||
+		*user.AuthUserID != concurrentAuthUser.ID ||
+		admin.deleteCalls != 0 {
+
+		t.Fatal("concurrent mapping was overwritten or deleted")
+	}
+}
+
+func TestLegacyLoginDoesNotLinkMismatchedExistingIdentity(t *testing.T) {
+	user, identity := legacySupabaseUser()
+	existingAuthUser := &models.SupabaseAuthUser{
+		ID:    "unrelated-auth-user-id",
+		Email: user.Email,
+	}
+	auth := &fakeSupabaseAuthentication{
+		signInErr: ErrInvalidCredentials,
+	}
+	users := &fakeSupabaseAuthUsers{user: user}
+	admin := &fakeLegacyMigrationAdmin{
+		findResults: []*models.SupabaseAuthUser{existingAuthUser},
+	}
+	service := newLegacyMigrationFacade(
+		auth,
+		users,
+		approvedLegacyApplication(),
+		&fakeSupabaseAuthIdentities{identity: identity},
+		&fakeLegacyPasswordVerifier{password: "OldPassword123!"},
+		admin,
+	)
+
+	_, err := service.Login(
+		context.Background(),
+		user.Email,
+		"OldPassword123!",
+		models.ApplicationCodeSilapet,
+	)
+	if !errors.Is(err, ErrAuthUnavailable) {
+		t.Fatalf("expected auth unavailable, got %v", err)
+	}
+
+	if users.linkCalls != 0 || user.AuthUserID != nil {
+		t.Fatal("mismatched existing Supabase identity was linked")
+	}
+
+	if admin.deleteCalls != 0 {
+		t.Fatal("identity not created by this request was deleted")
+	}
+}
+
+func TestSecondLoginUsesSupabaseWithoutLegacyFallback(t *testing.T) {
+	user, identity := legacySupabaseUser()
+	createdAuthUser := &models.SupabaseAuthUser{
+		ID:    "migrated-auth-user-id",
+		Email: user.Email,
+	}
+	auth := &fakeSupabaseAuthentication{
+		signInSession: &models.SupabaseSession{
+			AccessToken: "supabase-access",
+			User: models.SupabaseAuthUser{
+				ID: createdAuthUser.ID,
+			},
+		},
+	}
+	credentials := &fakeLegacyPasswordVerifier{
+		password: "OldPassword123!",
+	}
+	admin := &fakeLegacyMigrationAdmin{
+		findResults: []*models.SupabaseAuthUser{nil},
+		createdUser: createdAuthUser,
+	}
+	service := newLegacyMigrationFacade(
+		auth,
+		&fakeSupabaseAuthUsers{user: user},
+		approvedLegacyApplication(),
+		&fakeSupabaseAuthIdentities{identity: identity},
+		credentials,
+		admin,
+	)
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		_, err := service.Login(
+			context.Background(),
+			user.Email,
+			"OldPassword123!",
+			models.ApplicationCodeSilapet,
+		)
+		if err != nil {
+			t.Fatalf("login attempt %d returned error: %v", attempt, err)
+		}
+	}
+
+	if credentials.calls != 1 || admin.createCalls != 1 {
+		t.Fatal("second login reused the legacy migration path")
+	}
+
+	if auth.signInCalls != 2 {
+		t.Fatalf("expected two Supabase sign-ins, got %d", auth.signInCalls)
 	}
 }

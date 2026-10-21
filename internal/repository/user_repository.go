@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -85,6 +86,45 @@ func (r *UserRepository) GetByAuthUserID(
 	}
 
 	return user, nil
+}
+
+// LinkAuthUserIDIfUnset links a Supabase identity without overwriting a
+// mapping that may have been completed by a concurrent login request.
+func (r *UserRepository) LinkAuthUserIDIfUnset(
+	ctx context.Context,
+	appUserID string,
+	authUserID string,
+) (bool, error) {
+	appUserID = strings.TrimSpace(appUserID)
+	authUserID = strings.TrimSpace(authUserID)
+	if appUserID == "" || authUserID == "" {
+		return false, errors.New(
+			"app user ID and auth user ID are required",
+		)
+	}
+
+	result, err := r.pool.Exec(
+		ctx,
+		`
+		UPDATE public.app_users
+		SET
+			auth_user_id = $2,
+			updated_at = NOW()
+		WHERE id = $1
+		  AND auth_user_id IS NULL
+		  AND deleted_at IS NULL
+		`,
+		appUserID,
+		authUserID,
+	)
+	if err != nil {
+		return false, fmt.Errorf(
+			"link app user to Supabase auth user: %w",
+			err,
+		)
+	}
+
+	return result.RowsAffected() == 1, nil
 }
 
 func (r *UserRepository) GetByID(
