@@ -36,6 +36,7 @@ type AuthService struct {
 	applicationEnrollmentService   *ApplicationEnrollmentService
 	activeAuthenticationService    ActiveAuthenticationService
 	passwordRecoveryService        PasswordRecoveryService
+	registrationService            RegistrationService
 }
 
 func NewAuthService(
@@ -106,11 +107,14 @@ func (s *AuthService) SetPasswordRecoveryService(
 	s.passwordRecoveryService = service
 }
 
-// RegisterCentralIdentity creates a central self-hosted identity
-// together with its initial application membership.
-//
-// It deliberately does not create any application membership. SILAPET,
-// Klinik PKP, Arsiparis, and future applications own their own authorization.
+func (s *AuthService) SetRegistrationService(
+	service RegistrationService,
+) {
+	s.registrationService = service
+}
+
+// RegisterCentralIdentity creates a Supabase Auth identity together with the
+// mapped Central SSO profile and its initial application membership.
 func (s *AuthService) RegisterCentralIdentity(
 	ctx context.Context,
 	email string,
@@ -119,11 +123,11 @@ func (s *AuthService) RegisterCentralIdentity(
 	phone string,
 	application string,
 ) (*models.Identity, error) {
-	if s.centralRegistrationService == nil {
+	if s.registrationService == nil {
 		return nil, ErrAuthUnavailable
 	}
 
-	return s.centralRegistrationService.Register(
+	return s.registrationService.Register(
 		ctx,
 		email,
 		password,

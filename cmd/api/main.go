@@ -60,14 +60,6 @@ func main() {
 		credentialRepository,
 	)
 
-	centralRegistrationService :=
-		services.NewCentralRegistrationService(
-			userRepository,
-			applicationRepository,
-			credentialService,
-			centralRegistrationRepository,
-		)
-
 	supabaseAuthService, err := services.NewSupabaseAuthService(
 		cfg.SupabaseURL,
 		cfg.SupabasePublicKey,
@@ -109,6 +101,14 @@ func main() {
 			supabaseAdminService,
 		)
 
+	registrationService :=
+		services.NewSupabaseRegistrationService(
+			userRepository,
+			applicationRepository,
+			supabaseAdminService,
+			centralRegistrationRepository,
+		)
+
 	klinikCredentialService := services.NewKlinikCredentialService(
 		klinikUserRepository,
 	)
@@ -136,8 +136,8 @@ func main() {
 		klinikMigrationService,
 	)
 
-	authService.SetCentralRegistrationService(
-		centralRegistrationService,
+	authService.SetRegistrationService(
+		registrationService,
 	)
 
 	authService.SetActiveAuthenticationService(
