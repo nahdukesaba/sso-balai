@@ -8,21 +8,15 @@ import (
 )
 
 type Config struct {
-	AppHost               string
-	AppPort               string
-	DatabaseURL           string
-	AuthAccessTokenSecret string
-	SSOPublicURL          string
-	ResendAPIKey          string
-	ResendFromEmail       string
-	ResendFromName        string
+	AppHost                     string
+	AppPort                     string
+	DatabaseURL                 string
+	AuthAccessTokenSecret       string
+	PasswordRecoveryRedirectURL string
 
 	SupabaseURL       string
 	SupabasePublicKey string
 	SupabaseAdminKey  string
-
-	KlinikPasswordRecoveryRedirectURL  string
-	SilapetPasswordRecoveryRedirectURL string
 
 	BootstrapEmail    string
 	BootstrapPassword string
@@ -38,10 +32,10 @@ func Load() (*Config, error) {
 		AppPort:               getEnv("APP_PORT", "8080"),
 		DatabaseURL:           os.Getenv("DATABASE_URL"),
 		AuthAccessTokenSecret: os.Getenv("AUTH_ACCESS_TOKEN_SECRET"),
-		SSOPublicURL:          os.Getenv("SSO_PUBLIC_URL"),
-		ResendAPIKey:          os.Getenv("RESEND_API_KEY"),
-		ResendFromEmail:       os.Getenv("RESEND_FROM_EMAIL"),
-		ResendFromName:        os.Getenv("RESEND_FROM_NAME"),
+		PasswordRecoveryRedirectURL: getEnv(
+			"PASSWORD_RECOVERY_REDIRECT_URL",
+			"https://sso.bp3kpsumatera2.com/reset-password",
+		),
 
 		SupabaseURL: os.Getenv("SUPABASE_URL"),
 
@@ -53,13 +47,6 @@ func Load() (*Config, error) {
 		SupabaseAdminKey: firstNonEmpty(
 			os.Getenv("SUPABASE_SECRET_KEY"),
 			os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
-		),
-
-		KlinikPasswordRecoveryRedirectURL: os.Getenv(
-			"KLINIK_PASSWORD_RECOVERY_REDIRECT_URL",
-		),
-		SilapetPasswordRecoveryRedirectURL: os.Getenv(
-			"SILAPET_PASSWORD_RECOVERY_REDIRECT_URL",
 		),
 
 		BootstrapEmail:    os.Getenv("BOOTSTRAP_USER_EMAIL"),

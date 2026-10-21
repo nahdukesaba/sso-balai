@@ -12,6 +12,8 @@ func Register(
 	authHandler *handlers.AuthHandler,
 	authMiddleware *middleware.AuthMiddleware,
 ) {
+	app.Get("/reset-password", authHandler.ResetPasswordPage)
+
 	api := app.Group("/api/v1")
 
 	auth := api.Group("/auth")

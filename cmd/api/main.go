@@ -34,12 +34,8 @@ func main() {
 	applicationRepository := repository.NewApplicationRepository(db)
 	membershipRepository := repository.NewMembershipRepository(db)
 	credentialRepository := repository.NewCredentialRepository(db)
-	sessionRepository := repository.NewSessionRepository(db)
 	centralRegistrationRepository :=
 		repository.NewCentralRegistrationRepository(db)
-
-	passwordResetRepository :=
-		repository.NewPasswordResetRepository(db)
 
 	applicationEnrollmentRepository :=
 		repository.NewApplicationEnrollmentRepository(
@@ -88,6 +84,18 @@ func main() {
 			identityService,
 		)
 
+	passwordRecoveryService, err :=
+		services.NewSupabasePasswordRecoveryService(
+			supabaseAuthService,
+			cfg.PasswordRecoveryRedirectURL,
+		)
+	if err != nil {
+		log.Fatalf(
+			"failed to initialize Supabase password recovery: %v",
+			err,
+		)
+	}
+
 	supabaseAdminService, err := services.NewSupabaseAdminService(
 		cfg.SupabaseURL,
 		cfg.SupabaseAdminKey,
@@ -111,34 +119,6 @@ func main() {
 		klinikUserRepository,
 	)
 
-	resendRecoveryMailer, err :=
-		services.NewResendRecoveryMailer(
-			cfg.ResendAPIKey,
-			cfg.ResendFromEmail,
-			cfg.ResendFromName,
-		)
-	if err != nil {
-		log.Fatalf(
-			"failed to initialize recovery mailer: %v",
-			err,
-		)
-	}
-
-	centralPasswordRecoveryService, err :=
-		services.NewCentralPasswordRecoveryService(
-			passwordResetRepository,
-			credentialService,
-			sessionRepository,
-			resendRecoveryMailer,
-			cfg.SSOPublicURL,
-		)
-	if err != nil {
-		log.Fatalf(
-			"failed to initialize central password recovery: %v",
-			err,
-		)
-	}
-
 	applicationEnrollmentService :=
 		services.NewApplicationEnrollmentService(
 			applicationEnrollmentRepository,
@@ -152,8 +132,6 @@ func main() {
 		klinikContextService,
 		applicationContextService,
 		klinikMigrationService,
-		cfg.KlinikPasswordRecoveryRedirectURL,
-		cfg.SilapetPasswordRecoveryRedirectURL,
 	)
 
 	authService.SetCentralRegistrationService(
@@ -164,8 +142,8 @@ func main() {
 		activeAuthenticationService,
 	)
 
-	authService.SetCentralPasswordRecoveryService(
-		centralPasswordRecoveryService,
+	authService.SetPasswordRecoveryService(
+		passwordRecoveryService,
 	)
 
 	authService.SetApplicationEnrollmentService(

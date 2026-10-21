@@ -21,22 +21,21 @@ var (
 )
 
 type AuthService struct {
-	supabaseAuthService                *SupabaseAuthService
-	adminService                       *SupabaseAdminService
-	identityService                    *IdentityService
-	userRepository                     *repository.UserRepository
-	klinikContextService               *KlinikContextService
-	applicationContextService          *ApplicationContextService
-	klinikMigrationService             *KlinikMigrationService
-	centralLoginService                *CentralLoginService
-	centralRegistrationService         *CentralRegistrationService
-	centralSessionService              *SessionService
-	centralPasswordChangeService       *CentralPasswordChangeService
-	centralPasswordRecoveryService     *CentralPasswordRecoveryService
-	applicationEnrollmentService       *ApplicationEnrollmentService
-	activeAuthenticationService        ActiveAuthenticationService
-	klinikPasswordRecoveryRedirectURL  string
-	silapetPasswordRecoveryRedirectURL string
+	supabaseAuthService            *SupabaseAuthService
+	adminService                   *SupabaseAdminService
+	identityService                *IdentityService
+	userRepository                 *repository.UserRepository
+	klinikContextService           *KlinikContextService
+	applicationContextService      *ApplicationContextService
+	klinikMigrationService         *KlinikMigrationService
+	centralLoginService            *CentralLoginService
+	centralRegistrationService     *CentralRegistrationService
+	centralSessionService          *SessionService
+	centralPasswordChangeService   *CentralPasswordChangeService
+	centralPasswordRecoveryService *CentralPasswordRecoveryService
+	applicationEnrollmentService   *ApplicationEnrollmentService
+	activeAuthenticationService    ActiveAuthenticationService
+	passwordRecoveryService        PasswordRecoveryService
 }
 
 func NewAuthService(
@@ -47,8 +46,6 @@ func NewAuthService(
 	klinikContextService *KlinikContextService,
 	applicationContextService *ApplicationContextService,
 	klinikMigrationService *KlinikMigrationService,
-	klinikPasswordRecoveryRedirectURL string,
-	silapetPasswordRecoveryRedirectURL string,
 ) *AuthService {
 	return &AuthService{
 		supabaseAuthService:       supabaseAuthService,
@@ -58,12 +55,6 @@ func NewAuthService(
 		klinikContextService:      klinikContextService,
 		applicationContextService: applicationContextService,
 		klinikMigrationService:    klinikMigrationService,
-		klinikPasswordRecoveryRedirectURL: strings.TrimSpace(
-			klinikPasswordRecoveryRedirectURL,
-		),
-		silapetPasswordRecoveryRedirectURL: strings.TrimSpace(
-			silapetPasswordRecoveryRedirectURL,
-		),
 	}
 }
 
@@ -107,6 +98,12 @@ func (s *AuthService) SetActiveAuthenticationService(
 	service ActiveAuthenticationService,
 ) {
 	s.activeAuthenticationService = service
+}
+
+func (s *AuthService) SetPasswordRecoveryService(
+	service PasswordRecoveryService,
+) {
+	s.passwordRecoveryService = service
 }
 
 // RegisterCentralIdentity creates a central self-hosted identity
@@ -158,11 +155,11 @@ func (s *AuthService) RequestPasswordRecovery(
 	ctx context.Context,
 	email string,
 ) error {
-	if s.centralPasswordRecoveryService == nil {
+	if s.passwordRecoveryService == nil {
 		return ErrAuthUnavailable
 	}
 
-	return s.centralPasswordRecoveryService.Request(
+	return s.passwordRecoveryService.Request(
 		ctx,
 		email,
 	)
@@ -283,16 +280,16 @@ func (s *AuthService) ChangePassword(
 
 func (s *AuthService) ResetPassword(
 	ctx context.Context,
-	token string,
+	tokenHash string,
 	password string,
 ) error {
-	if s.centralPasswordRecoveryService == nil {
+	if s.passwordRecoveryService == nil {
 		return ErrAuthUnavailable
 	}
 
-	return s.centralPasswordRecoveryService.Reset(
+	return s.passwordRecoveryService.Reset(
 		ctx,
-		token,
+		tokenHash,
 		password,
 	)
 }

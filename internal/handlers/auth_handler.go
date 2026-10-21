@@ -327,21 +327,20 @@ func (h *AuthHandler) ResetPassword(
 		})
 	}
 
-	request.Token = strings.TrimSpace(
-		request.Token,
-	)
 	request.TokenHash = strings.TrimSpace(
 		request.TokenHash,
 	)
+	request.Token = strings.TrimSpace(
+		request.Token,
+	)
 
-	// tokenHash remains accepted temporarily so existing clients do
-	// not break. In the self-hosted flow its value is treated as the
-	// raw opaque central recovery token, not a Supabase token hash.
-	if request.Token == "" {
-		request.Token = request.TokenHash
+	// token remains a temporary compatibility alias. Both fields carry the
+	// Supabase recovery token hash; the self-hosted protocol is not used.
+	if request.TokenHash == "" {
+		request.TokenHash = request.Token
 	}
 
-	if request.Token == "" {
+	if request.TokenHash == "" {
 		return c.Status(
 			fiber.StatusBadRequest,
 		).JSON(fiber.Map{
@@ -352,7 +351,7 @@ func (h *AuthHandler) ResetPassword(
 
 	if err := h.authService.ResetPassword(
 		c.UserContext(),
-		request.Token,
+		request.TokenHash,
 		request.Password,
 	); err != nil {
 		return handleResetPasswordError(
