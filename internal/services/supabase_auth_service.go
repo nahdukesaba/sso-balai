@@ -42,7 +42,7 @@ type passwordRecoveryRequest struct {
 	Email string `json:"email"`
 }
 
-type passwordRecoveryVerificationRequest struct {
+type emailTokenVerificationRequest struct {
 	Type      string `json:"type"`
 	TokenHash string `json:"token_hash"`
 }
@@ -249,20 +249,35 @@ func (s *SupabaseAuthService) VerifyPasswordRecoveryToken(
 	ctx context.Context,
 	tokenHash string,
 ) (*models.SupabaseSession, error) {
+	return s.verifyEmailToken(ctx, tokenHash, "recovery")
+}
+
+func (s *SupabaseAuthService) VerifyMagicLinkToken(
+	ctx context.Context,
+	tokenHash string,
+) (*models.SupabaseSession, error) {
+	return s.verifyEmailToken(ctx, tokenHash, "magiclink")
+}
+
+func (s *SupabaseAuthService) verifyEmailToken(
+	ctx context.Context,
+	tokenHash string,
+	verificationType string,
+) (*models.SupabaseSession, error) {
 	tokenHash = strings.TrimSpace(tokenHash)
 
 	if tokenHash == "" {
 		return nil, ErrInvalidToken
 	}
 
-	payload := passwordRecoveryVerificationRequest{
-		Type:      "recovery",
+	payload := emailTokenVerificationRequest{
+		Type:      verificationType,
 		TokenHash: tokenHash,
 	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal password recovery verification: %w", err)
+		return nil, fmt.Errorf("marshal email token verification: %w", err)
 	}
 
 	endpoint := s.baseURL + "/auth/v1/verify"
@@ -274,7 +289,7 @@ func (s *SupabaseAuthService) VerifyPasswordRecoveryToken(
 		bytes.NewReader(body),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("create password recovery verification request: %w", err)
+		return nil, fmt.Errorf("create email token verification request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -301,7 +316,7 @@ func (s *SupabaseAuthService) VerifyPasswordRecoveryToken(
 
 	default:
 		return nil, fmt.Errorf(
-			"%w: recovery verification upstream returned status %d",
+			"%w: email token verification upstream returned status %d",
 			ErrAuthUnavailable,
 			resp.StatusCode,
 		)
@@ -310,7 +325,7 @@ func (s *SupabaseAuthService) VerifyPasswordRecoveryToken(
 	var tokenResponse supabaseTokenResponse
 
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResponse); err != nil {
-		return nil, fmt.Errorf("decode password recovery verification: %w", err)
+		return nil, fmt.Errorf("decode email token verification: %w", err)
 	}
 
 	if tokenResponse.AccessToken == "" || tokenResponse.User.ID == "" {

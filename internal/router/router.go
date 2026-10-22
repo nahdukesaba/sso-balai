@@ -11,8 +11,19 @@ func Register(
 	app *fiber.App,
 	authHandler *handlers.AuthHandler,
 	authMiddleware *middleware.AuthMiddleware,
+	browserSSOHandlers ...*handlers.BrowserSSOHandler,
 ) {
 	app.Get("/reset-password", authHandler.ResetPasswordPage)
+
+	if len(browserSSOHandlers) > 0 && browserSSOHandlers[0] != nil {
+		browserSSOHandler := browserSSOHandlers[0]
+		app.Get("/authorize", browserSSOHandler.Authorize)
+		app.Get("/login", browserSSOHandler.LoginPage)
+		app.Post("/login", browserSSOHandler.LoginSubmit)
+		app.Get("/logout", browserSSOHandler.LogoutPage)
+		app.Post("/logout", browserSSOHandler.LogoutSubmit)
+		app.Post("/api/v1/auth/sso/exchange", browserSSOHandler.Exchange)
+	}
 
 	api := app.Group("/api/v1")
 

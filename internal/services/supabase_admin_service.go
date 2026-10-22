@@ -41,6 +41,16 @@ type adminListUsersResponse struct {
 	Users []adminAuthUserResponse `json:"users"`
 }
 
+type generateMagicLinkRequest struct {
+	Type  string `json:"type"`
+	Email string `json:"email"`
+}
+
+type generateMagicLinkResponse struct {
+	HashedToken      string `json:"hashed_token"`
+	VerificationType string `json:"verification_type"`
+}
+
 func (s *SupabaseAdminService) FindUserByEmail(
 	ctx context.Context,
 	email string,
@@ -232,6 +242,57 @@ func (s *SupabaseAdminService) DeleteUser(
 	}
 
 	return nil
+}
+
+func (s *SupabaseAdminService) GenerateMagicLinkToken(
+	ctx context.Context,
+	email string,
+) (string, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return "", errors.New("email is required")
+	}
+
+	body, err := json.Marshal(generateMagicLinkRequest{
+		Type:  "magiclink",
+		Email: email,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal admin magic-link request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		s.baseURL+"/auth/v1/admin/generate_link",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return "", fmt.Errorf("create admin magic-link request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	s.setAdminHeaders(req)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrAdminUnavailable, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf(
+			"%w: generate magic link returned status %d",
+			ErrAdminUnavailable,
+			resp.StatusCode,
+		)
+	}
+
+	var result generateMagicLinkResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode admin magic-link response: %w", err)
+	}
+	if result.VerificationType != "magiclink" || strings.TrimSpace(result.HashedToken) == "" {
+		return "", ErrAdminUnavailable
+	}
+	return result.HashedToken, nil
 }
 
 func (s *SupabaseAdminService) setAdminHeaders(req *http.Request) {

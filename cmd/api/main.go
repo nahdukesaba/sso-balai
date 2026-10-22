@@ -36,6 +36,7 @@ func main() {
 	credentialRepository := repository.NewCredentialRepository(db)
 	centralRegistrationRepository :=
 		repository.NewCentralRegistrationRepository(db)
+	browserSSORepository := repository.NewBrowserSSORepository(db)
 
 	applicationEnrollmentRepository :=
 		repository.NewApplicationEnrollmentRepository(
@@ -169,6 +170,46 @@ func main() {
 		klinikContextService,
 		applicationContextService,
 	)
+
+	var browserSSOService *services.BrowserSSOService
+	if cfg.SSOBrowserEnabled {
+		browserSSOSessionIssuer, issuerErr :=
+			services.NewSupabaseBrowserSSOSessionIssuer(
+				supabaseAdminService,
+				supabaseAuthService,
+			)
+		if issuerErr != nil {
+			log.Fatalf("failed to initialize browser SSO session issuer: %v", issuerErr)
+		}
+		browserSSOService, err = services.NewBrowserSSOService(
+			browserSSORepository,
+			supabaseAuthService,
+			browserSSOSessionIssuer,
+			userRepository,
+			applicationContextService,
+			applicationEnrollmentService,
+			identityService,
+			services.BrowserSSOConfig{
+				ClientID:        cfg.SSOSilapetClientID,
+				ApplicationCode: cfg.SSOSilapetApplicationCode,
+				RedirectURIs:    cfg.SSOSilapetRedirectURIs,
+				PostLogoutURIs:  cfg.SSOSilapetPostLogoutURIs,
+				SessionTTL:      cfg.SSOBrowserSessionTTL,
+				CodeTTL:         cfg.SSOAuthorizationCodeTTL,
+				EncryptionKey:   cfg.SSOBrowserSessionKey,
+			},
+		)
+		if err != nil {
+			log.Fatalf("failed to initialize browser SSO: %v", err)
+		}
+	}
+
+	browserSSOHandler := handlers.NewBrowserSSOHandler(
+		browserSSOService,
+		cfg.SSOBrowserCookieSecure,
+		cfg.SSOBrowserCookieSameSite,
+		cfg.SSOBrowserSessionTTL,
+	)
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 	app := fiber.New()
 
@@ -184,6 +225,7 @@ func main() {
 		app,
 		authHandler,
 		authMiddleware,
+		browserSSOHandler,
 	)
 
 	listenAddress := cfg.AppHost + ":" + cfg.AppPort

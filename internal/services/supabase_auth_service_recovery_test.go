@@ -24,7 +24,7 @@ func TestVerifyPasswordRecoveryToken(t *testing.T) {
 				t.Fatal("expected Supabase API key")
 			}
 
-			var body passwordRecoveryVerificationRequest
+			var body emailTokenVerificationRequest
 
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode request: %v", err)
@@ -84,6 +84,37 @@ func TestVerifyPasswordRecoveryToken(t *testing.T) {
 			"unexpected user id %q",
 			session.User.ID,
 		)
+	}
+}
+
+func TestVerifyMagicLinkToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body emailTokenVerificationRequest
+		if r.Method != http.MethodPost || r.URL.Path != "/auth/v1/verify" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body.Type != "magiclink" || body.TokenHash != "magic-hash" {
+			t.Fatalf("unexpected verification body: %#v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"access_token":"access","refresh_token":"refresh","token_type":"bearer",
+			"expires_in":3600,"expires_at":1799999999,
+			"user":{"id":"auth-user","email":"person@example.com"}
+		}`))
+	}))
+	defer server.Close()
+
+	service, err := NewSupabaseAuthService(server.URL, "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.VerifyMagicLinkToken(context.Background(), "magic-hash")
+	if err != nil || session.User.ID != "auth-user" || session.RefreshToken != "refresh" {
+		t.Fatalf("unexpected session: %#v %v", session, err)
 	}
 }
 
