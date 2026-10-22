@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +28,11 @@ type Config struct {
 	SSOSilapetRedirectURIs      []string
 	SSOSilapetPostLogoutURIs    []string
 	PortalSilapetLaunchURL      string
+	SSOKlinikClientID           string
+	SSOKlinikApplicationCode    string
+	SSOKlinikRedirectURIs       []string
+	SSOKlinikPostLogoutURIs     []string
+	PortalKlinikLaunchURL       string
 
 	SupabaseURL       string
 	SupabasePublicKey string
@@ -56,11 +62,16 @@ func Load() (*Config, error) {
 		SSOBrowserCookieSameSite:  getEnv("SSO_BROWSER_COOKIE_SAME_SITE", "Lax"),
 		SSOBrowserSessionTTL:      getEnvDuration("SSO_BROWSER_SESSION_TTL", 8*time.Hour),
 		SSOAuthorizationCodeTTL:   getEnvDuration("SSO_AUTHORIZATION_CODE_TTL", 3*time.Minute),
-		SSOSilapetClientID:        getEnv("SSO_SILAPET_CLIENT_ID", "silapet-web"),
-		SSOSilapetApplicationCode: getEnv("SSO_SILAPET_APPLICATION_CODE", "silapet"),
+		SSOSilapetClientID:        strings.TrimSpace(getEnv("SSO_SILAPET_CLIENT_ID", "silapet-web")),
+		SSOSilapetApplicationCode: strings.TrimSpace(getEnv("SSO_SILAPET_APPLICATION_CODE", "silapet")),
 		SSOSilapetRedirectURIs:    splitCSV(os.Getenv("SSO_SILAPET_REDIRECT_URIS")),
 		SSOSilapetPostLogoutURIs:  splitCSV(os.Getenv("SSO_SILAPET_POST_LOGOUT_REDIRECT_URIS")),
-		PortalSilapetLaunchURL:    getEnv("PORTAL_SILAPET_LAUNCH_URL", "http://127.0.0.1:5173/"),
+		PortalSilapetLaunchURL:    strings.TrimSpace(getEnv("PORTAL_SILAPET_LAUNCH_URL", "http://127.0.0.1:5173/")),
+		SSOKlinikClientID:         strings.TrimSpace(getEnv("SSO_KLINIK_CLIENT_ID", "klinik-pkp-web")),
+		SSOKlinikApplicationCode:  strings.TrimSpace(getEnv("SSO_KLINIK_APPLICATION_CODE", "klinik_pkp")),
+		SSOKlinikRedirectURIs:     splitCSV(os.Getenv("SSO_KLINIK_REDIRECT_URIS")),
+		SSOKlinikPostLogoutURIs:   splitCSV(os.Getenv("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS")),
+		PortalKlinikLaunchURL:     strings.TrimSpace(os.Getenv("PORTAL_KLINIK_LAUNCH_URL")),
 
 		SupabaseURL: os.Getenv("SUPABASE_URL"),
 
@@ -94,6 +105,39 @@ func Load() (*Config, error) {
 		if len(cfg.SSOSilapetPostLogoutURIs) == 0 {
 			return nil, fmt.Errorf("SSO_SILAPET_POST_LOGOUT_REDIRECT_URIS is required when browser SSO is enabled")
 		}
+		if strings.TrimSpace(cfg.SSOSilapetClientID) == "" || strings.TrimSpace(cfg.SSOSilapetApplicationCode) == "" {
+			return nil, fmt.Errorf("SILAPET browser SSO client ID and application code are required")
+		}
+		if strings.TrimSpace(cfg.SSOKlinikClientID) == "" || strings.TrimSpace(cfg.SSOKlinikApplicationCode) == "" {
+			return nil, fmt.Errorf("Klinik browser SSO client ID and application code are required")
+		}
+		if strings.TrimSpace(cfg.SSOSilapetClientID) == strings.TrimSpace(cfg.SSOKlinikClientID) {
+			return nil, fmt.Errorf("browser SSO client IDs must be unique")
+		}
+		if len(cfg.SSOKlinikRedirectURIs) == 0 {
+			return nil, fmt.Errorf("SSO_KLINIK_REDIRECT_URIS is required when browser SSO is enabled")
+		}
+		if len(cfg.SSOKlinikPostLogoutURIs) == 0 {
+			return nil, fmt.Errorf("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS is required when browser SSO is enabled")
+		}
+		if err := validateConfiguredHTTPURLs("SSO_SILAPET_REDIRECT_URIS", cfg.SSOSilapetRedirectURIs); err != nil {
+			return nil, err
+		}
+		if err := validateConfiguredHTTPURLs("SSO_SILAPET_POST_LOGOUT_REDIRECT_URIS", cfg.SSOSilapetPostLogoutURIs); err != nil {
+			return nil, err
+		}
+		if err := validateConfiguredHTTPURLs("SSO_KLINIK_REDIRECT_URIS", cfg.SSOKlinikRedirectURIs); err != nil {
+			return nil, err
+		}
+		if err := validateConfiguredHTTPURLs("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS", cfg.SSOKlinikPostLogoutURIs); err != nil {
+			return nil, err
+		}
+		if err := validateConfiguredHTTPURLs("PORTAL_SILAPET_LAUNCH_URL", []string{cfg.PortalSilapetLaunchURL}); err != nil {
+			return nil, err
+		}
+		if err := validateConfiguredHTTPURLs("PORTAL_KLINIK_LAUNCH_URL", []string{cfg.PortalKlinikLaunchURL}); err != nil {
+			return nil, err
+		}
 		sameSite := strings.ToLower(strings.TrimSpace(cfg.SSOBrowserCookieSameSite))
 		if sameSite != "lax" && sameSite != "strict" && sameSite != "none" {
 			return nil, fmt.Errorf("SSO_BROWSER_COOKIE_SAME_SITE must be Lax, Strict, or None")
@@ -104,6 +148,24 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func validateConfiguredHTTPURLs(name string, values []string) error {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || strings.ContainsAny(value, "*#") {
+			return fmt.Errorf("%s must contain only absolute HTTP(S) URLs", name)
+		}
+		parsed, err := url.ParseRequestURI(value)
+		if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+			return fmt.Errorf("%s must contain only absolute HTTP(S) URLs", name)
+		}
+		scheme := strings.ToLower(parsed.Scheme)
+		if scheme != "http" && scheme != "https" {
+			return fmt.Errorf("%s must contain only absolute HTTP(S) URLs", name)
+		}
+	}
+	return nil
 }
 
 func getEnvBool(key string, fallback bool) bool {

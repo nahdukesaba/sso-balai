@@ -6,11 +6,11 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -68,31 +68,38 @@ type BrowserSSOIdentities interface {
 }
 
 type BrowserSSOConfig struct {
-	ClientID        string
-	ApplicationCode string
-	RedirectURIs    []string
-	PostLogoutURIs  []string
-	SessionTTL      time.Duration
-	CodeTTL         time.Duration
-	EncryptionKey   string
+	Clients       []BrowserSSOClient
+	SessionTTL    time.Duration
+	CodeTTL       time.Duration
+	EncryptionKey string
 }
 
-type BrowserSSOService struct {
-	store           BrowserSSOStore
-	auth            BrowserSSOAuth
-	sessionIssuer   BrowserSSOSessionIssuer
-	users           BrowserSSOUsers
-	applications    BrowserSSOApplications
-	enrollments     BrowserSSOEnrollments
-	identities      BrowserSSOIdentities
-	clientID        string
+type BrowserSSOClient struct {
+	ClientID               string
+	ApplicationCode        string
+	RedirectURIs           []string
+	PostLogoutRedirectURIs []string
+}
+
+type registeredBrowserSSOClient struct {
 	applicationCode string
 	redirectURIs    map[string]struct{}
 	postLogoutURIs  map[string]struct{}
-	sessionTTL      time.Duration
-	codeTTL         time.Duration
-	aead            cipher.AEAD
-	now             func() time.Time
+}
+
+type BrowserSSOService struct {
+	store         BrowserSSOStore
+	auth          BrowserSSOAuth
+	sessionIssuer BrowserSSOSessionIssuer
+	users         BrowserSSOUsers
+	applications  BrowserSSOApplications
+	enrollments   BrowserSSOEnrollments
+	identities    BrowserSSOIdentities
+	clients       map[string]registeredBrowserSSOClient
+	sessionTTL    time.Duration
+	codeTTL       time.Duration
+	aead          cipher.AEAD
+	now           func() time.Time
 }
 
 func NewBrowserSSOService(
@@ -118,59 +125,99 @@ func NewBrowserSSOService(
 		return nil, fmt.Errorf("initialize browser SSO encryption: %w", err)
 	}
 
-	redirects := make(map[string]struct{}, len(config.RedirectURIs))
-	for _, redirectURI := range config.RedirectURIs {
-		redirectURI = strings.TrimSpace(redirectURI)
-		if redirectURI != "" {
-			redirects[redirectURI] = struct{}{}
-		}
-	}
-	postLogoutRedirects := make(map[string]struct{}, len(config.PostLogoutURIs))
-	for _, redirectURI := range config.PostLogoutURIs {
-		redirectURI = strings.TrimSpace(redirectURI)
-		if redirectURI != "" {
-			postLogoutRedirects[redirectURI] = struct{}{}
-		}
+	clients, err := buildBrowserSSOClientRegistry(config.Clients)
+	if err != nil {
+		return nil, err
 	}
 	if store == nil || auth == nil || sessionIssuer == nil || users == nil || applications == nil ||
-		enrollments == nil || identities == nil || strings.TrimSpace(config.ClientID) == "" ||
-		strings.TrimSpace(config.ApplicationCode) == "" || len(redirects) == 0 ||
-		len(postLogoutRedirects) == 0 {
+		enrollments == nil || identities == nil || len(clients) == 0 {
 		return nil, ErrBrowserSSODisabled
 	}
 
 	return &BrowserSSOService{
-		store:           store,
-		auth:            auth,
-		sessionIssuer:   sessionIssuer,
-		users:           users,
-		applications:    applications,
-		enrollments:     enrollments,
-		identities:      identities,
-		clientID:        strings.TrimSpace(config.ClientID),
-		applicationCode: strings.ToLower(strings.TrimSpace(config.ApplicationCode)),
-		redirectURIs:    redirects,
-		postLogoutURIs:  postLogoutRedirects,
-		sessionTTL:      config.SessionTTL,
-		codeTTL:         config.CodeTTL,
-		aead:            aead,
-		now:             time.Now,
+		store:         store,
+		auth:          auth,
+		sessionIssuer: sessionIssuer,
+		users:         users,
+		applications:  applications,
+		enrollments:   enrollments,
+		identities:    identities,
+		clients:       clients,
+		sessionTTL:    config.SessionTTL,
+		codeTTL:       config.CodeTTL,
+		aead:          aead,
+		now:           time.Now,
 	}, nil
 }
 
 func (s *BrowserSSOService) ValidatePostLogoutRedirect(clientID, redirectURI string) error {
-	clientID = strings.TrimSpace(clientID)
-	redirectURI = strings.TrimSpace(redirectURI)
 	if clientID == "" && redirectURI == "" {
 		return nil
 	}
-	if subtle.ConstantTimeCompare([]byte(clientID), []byte(s.clientID)) != 1 {
+	client, ok := s.clients[clientID]
+	if !ok {
 		return ErrInvalidAuthorizeRequest
 	}
-	if _, ok := s.postLogoutURIs[redirectURI]; !ok {
+	if _, ok := client.postLogoutURIs[redirectURI]; !ok {
 		return ErrInvalidAuthorizeRequest
 	}
 	return nil
+}
+
+func buildBrowserSSOClientRegistry(configs []BrowserSSOClient) (map[string]registeredBrowserSSOClient, error) {
+	clients := make(map[string]registeredBrowserSSOClient, len(configs))
+	for _, config := range configs {
+		clientID := strings.TrimSpace(config.ClientID)
+		applicationCode := strings.ToLower(strings.TrimSpace(config.ApplicationCode))
+		if clientID == "" || applicationCode == "" {
+			return nil, fmt.Errorf("%w: client ID and application code are required", ErrBrowserSSODisabled)
+		}
+		if _, exists := clients[clientID]; exists {
+			return nil, fmt.Errorf("%w: duplicate client ID %q", ErrBrowserSSODisabled, clientID)
+		}
+
+		redirectURIs, err := buildBrowserSSOURIAllowlist(config.RedirectURIs)
+		if err != nil {
+			return nil, fmt.Errorf("%w: client %q redirect URIs: %v", ErrBrowserSSODisabled, clientID, err)
+		}
+		postLogoutURIs, err := buildBrowserSSOURIAllowlist(config.PostLogoutRedirectURIs)
+		if err != nil {
+			return nil, fmt.Errorf("%w: client %q post-logout redirect URIs: %v", ErrBrowserSSODisabled, clientID, err)
+		}
+		clients[clientID] = registeredBrowserSSOClient{
+			applicationCode: applicationCode,
+			redirectURIs:    redirectURIs,
+			postLogoutURIs:  postLogoutURIs,
+		}
+	}
+	return clients, nil
+}
+
+func buildBrowserSSOURIAllowlist(values []string) (map[string]struct{}, error) {
+	allowlist := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if !validAbsoluteHTTPURL(value) {
+			return nil, fmt.Errorf("invalid absolute HTTP(S) URI %q", value)
+		}
+		allowlist[value] = struct{}{}
+	}
+	if len(allowlist) == 0 {
+		return nil, errors.New("at least one URI is required")
+	}
+	return allowlist, nil
+}
+
+func validAbsoluteHTTPURL(value string) bool {
+	if value == "" || strings.ContainsAny(value, "*#") {
+		return false
+	}
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+		return false
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	return scheme == "http" || scheme == "https"
 }
 
 func decodeBrowserSSOKey(encoded string) ([]byte, error) {
@@ -188,10 +235,11 @@ func decodeBrowserSSOKey(encoded string) ([]byte, error) {
 func (s *BrowserSSOService) ValidateAuthorizeRequest(
 	request models.BrowserSSOAuthorizeRequest,
 ) error {
-	if subtle.ConstantTimeCompare([]byte(request.ClientID), []byte(s.clientID)) != 1 {
+	client, ok := s.clients[request.ClientID]
+	if !ok {
 		return ErrInvalidAuthorizeRequest
 	}
-	if _, ok := s.redirectURIs[request.RedirectURI]; !ok {
+	if _, ok := client.redirectURIs[request.RedirectURI]; !ok {
 		return ErrInvalidAuthorizeRequest
 	}
 	if request.ResponseType != "code" || request.State == "" || len(request.State) > 512 ||
@@ -278,6 +326,7 @@ func (s *BrowserSSOService) Authorize(
 	if err := s.ValidateAuthorizeRequest(request); err != nil {
 		return nil, err
 	}
+	client := s.clients[request.ClientID]
 	result := &models.BrowserSSOAuthorizeResult{
 		State: request.State, RedirectURI: request.RedirectURI,
 	}
@@ -290,9 +339,9 @@ func (s *BrowserSSOService) Authorize(
 		return result, nil
 	}
 
-	application, err := s.applications.GetByAppUserID(ctx, browserSession.AppUserID, s.applicationCode)
+	application, err := s.applications.GetByAppUserID(ctx, browserSession.AppUserID, client.applicationCode)
 	if errors.Is(err, ErrApplicationMembershipUnavailable) {
-		enrollment, enrollmentErr := s.enrollments.Request(ctx, browserSession.AppUserID, s.applicationCode)
+		enrollment, enrollmentErr := s.enrollments.Request(ctx, browserSession.AppUserID, client.applicationCode)
 		if enrollmentErr != nil {
 			if errors.Is(enrollmentErr, ErrApplicationEnrollmentBlocked) {
 				result.Status = browserSSOStatusDenied
@@ -304,7 +353,7 @@ func (s *BrowserSSOService) Authorize(
 			result.Status = browserSSOStatusPending
 			return result, nil
 		}
-		application, err = s.applications.GetByAppUserID(ctx, browserSession.AppUserID, s.applicationCode)
+		application, err = s.applications.GetByAppUserID(ctx, browserSession.AppUserID, client.applicationCode)
 	}
 	if err != nil {
 		return nil, err
@@ -351,10 +400,11 @@ func (s *BrowserSSOService) Exchange(
 	redirectURI string,
 	codeVerifier string,
 ) (*models.LoginResult, error) {
-	if code == "" || clientID != s.clientID {
+	client, ok := s.clients[clientID]
+	if code == "" || !ok {
 		return nil, ErrInvalidAuthorizationCode
 	}
-	if _, ok := s.redirectURIs[redirectURI]; !ok {
+	if _, ok := client.redirectURIs[redirectURI]; !ok {
 		return nil, ErrInvalidAuthorizationCode
 	}
 	if !pkceValuePattern.MatchString(codeVerifier) {
@@ -397,7 +447,7 @@ func (s *BrowserSSOService) Exchange(
 		supabaseSession.AccessToken == "" || supabaseSession.RefreshToken == "" {
 		return nil, ErrInvalidBrowserSession
 	}
-	application, err := s.applications.GetByAppUserID(ctx, stored.AppUserID, s.applicationCode)
+	application, err := s.applications.GetByAppUserID(ctx, stored.AppUserID, client.applicationCode)
 	if err != nil || application == nil || application.Status != models.MembershipStatusApproved {
 		return nil, ErrAccountUnavailable
 	}

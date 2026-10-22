@@ -191,13 +191,23 @@ func main() {
 			applicationEnrollmentService,
 			identityService,
 			services.BrowserSSOConfig{
-				ClientID:        cfg.SSOSilapetClientID,
-				ApplicationCode: cfg.SSOSilapetApplicationCode,
-				RedirectURIs:    cfg.SSOSilapetRedirectURIs,
-				PostLogoutURIs:  cfg.SSOSilapetPostLogoutURIs,
-				SessionTTL:      cfg.SSOBrowserSessionTTL,
-				CodeTTL:         cfg.SSOAuthorizationCodeTTL,
-				EncryptionKey:   cfg.SSOBrowserSessionKey,
+				Clients: []services.BrowserSSOClient{
+					{
+						ClientID:               cfg.SSOSilapetClientID,
+						ApplicationCode:        cfg.SSOSilapetApplicationCode,
+						RedirectURIs:           cfg.SSOSilapetRedirectURIs,
+						PostLogoutRedirectURIs: cfg.SSOSilapetPostLogoutURIs,
+					},
+					{
+						ClientID:               cfg.SSOKlinikClientID,
+						ApplicationCode:        cfg.SSOKlinikApplicationCode,
+						RedirectURIs:           cfg.SSOKlinikRedirectURIs,
+						PostLogoutRedirectURIs: cfg.SSOKlinikPostLogoutURIs,
+					},
+				},
+				SessionTTL:    cfg.SSOBrowserSessionTTL,
+				CodeTTL:       cfg.SSOAuthorizationCodeTTL,
+				EncryptionKey: cfg.SSOBrowserSessionKey,
 			},
 		)
 		if err != nil {
@@ -207,6 +217,7 @@ func main() {
 			browserSSOService,
 			applicationRepository,
 			cfg.PortalSilapetLaunchURL,
+			cfg.PortalKlinikLaunchURL,
 		)
 		if err != nil {
 			log.Fatalf("failed to initialize account portal: %v", err)

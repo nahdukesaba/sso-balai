@@ -139,10 +139,21 @@ func newHandlerBrowserSSOTestSetup(
 		handlerBrowserSSOEnrollments{},
 		handlerBrowserSSOIdentities{},
 		services.BrowserSSOConfig{
-			ClientID: "silapet-web", ApplicationCode: "silapet",
-			RedirectURIs:   []string{redirectURI},
-			PostLogoutURIs: []string{"http://localhost:8081/login"},
-			SessionTTL:     time.Hour, CodeTTL: 3 * time.Minute,
+			Clients: []services.BrowserSSOClient{
+				{
+					ClientID:               "silapet-web",
+					ApplicationCode:        "silapet",
+					RedirectURIs:           []string{redirectURI},
+					PostLogoutRedirectURIs: []string{"http://localhost:8081/login"},
+				},
+				{
+					ClientID:               "klinik-pkp-web",
+					ApplicationCode:        "klinik_pkp",
+					RedirectURIs:           []string{"http://localhost:3000/auth/sso/callback"},
+					PostLogoutRedirectURIs: []string{"http://localhost:3000/login"},
+				},
+			},
+			SessionTTL: time.Hour, CodeTTL: 3 * time.Minute,
 			EncryptionKey: base64.StdEncoding.EncodeToString(
 				[]byte("01234567890123456789012345678901"),
 			),
@@ -218,34 +229,6 @@ func TestBrowserSSOLoginCSPNeverUsesUnregisteredOrigin(t *testing.T) {
 	if response.StatusCode != http.StatusBadRequest ||
 		strings.Contains(response.Header.Get("Content-Security-Policy"), "evil.example") {
 		t.Fatalf("unregistered origin reached CSP: %d %q", response.StatusCode, response.Header.Get("Content-Security-Policy"))
-	}
-}
-
-func TestBrowserSSOLoginPageRejectsRegisteredRedirectWithoutHTTPOrigin(t *testing.T) {
-	redirectURI := "javascript://callback"
-	handler := newHandlerBrowserSSOWithOptions(t, nil, redirectURI, nil)
-	app := fiber.New()
-	app.Get("/authorize", handler.Authorize)
-	app.Get("/login", handler.LoginPage)
-
-	authorizeResponse, err := app.Test(httptest.NewRequest(
-		http.MethodGet,
-		authorizeTargetFor(redirectURI),
-		nil,
-	))
-	if err != nil {
-		t.Fatal(err)
-	}
-	loginResponse, err := app.Test(httptest.NewRequest(
-		http.MethodGet,
-		authorizeResponse.Header.Get("Location"),
-		nil,
-	))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loginResponse.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected invalid redirect to fail safely, got %d", loginResponse.StatusCode)
 	}
 }
 

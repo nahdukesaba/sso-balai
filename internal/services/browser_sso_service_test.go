@@ -84,20 +84,29 @@ func (f *fakeBrowserSSOUsers) GetByAuthUserID(context.Context, string) (*models.
 }
 
 type fakeBrowserSSOApps struct {
-	application *models.ApplicationContext
-	err         error
+	application   *models.ApplicationContext
+	err           error
+	byCode        map[string]*models.ApplicationContext
+	errorsByCode  map[string]error
+	requestedCode []string
 }
 
-func (f *fakeBrowserSSOApps) GetByAppUserID(context.Context, string, string) (*models.ApplicationContext, error) {
+func (f *fakeBrowserSSOApps) GetByAppUserID(_ context.Context, _ string, applicationCode string) (*models.ApplicationContext, error) {
+	f.requestedCode = append(f.requestedCode, applicationCode)
+	if f.byCode != nil || f.errorsByCode != nil {
+		return f.byCode[applicationCode], f.errorsByCode[applicationCode]
+	}
 	return f.application, f.err
 }
 
 type fakeBrowserSSOEnrollments struct {
-	result *models.ApplicationEnrollmentResult
-	err    error
+	result        *models.ApplicationEnrollmentResult
+	err           error
+	requestedCode []string
 }
 
-func (f *fakeBrowserSSOEnrollments) Request(context.Context, string, string) (*models.ApplicationEnrollmentResult, error) {
+func (f *fakeBrowserSSOEnrollments) Request(_ context.Context, _ string, applicationCode string) (*models.ApplicationEnrollmentResult, error) {
+	f.requestedCode = append(f.requestedCode, applicationCode)
 	return f.result, f.err
 }
 
@@ -121,10 +130,21 @@ func newBrowserSSOTestService(t *testing.T) (*BrowserSSOService, *fakeBrowserSSO
 		store, auth, issuer, &fakeBrowserSSOUsers{user: user}, apps, enrollments,
 		&fakeBrowserSSOIdentities{identity: &models.Identity{User: user}},
 		BrowserSSOConfig{
-			ClientID: "silapet-web", ApplicationCode: "silapet",
-			RedirectURIs:   []string{"http://localhost:8081/auth/sso/callback"},
-			PostLogoutURIs: []string{"http://localhost:8081/login"},
-			SessionTTL:     time.Hour, CodeTTL: 3 * time.Minute,
+			Clients: []BrowserSSOClient{
+				{
+					ClientID:               "silapet-web",
+					ApplicationCode:        "silapet",
+					RedirectURIs:           []string{"http://localhost:8081/auth/sso/callback"},
+					PostLogoutRedirectURIs: []string{"http://localhost:8081/login"},
+				},
+				{
+					ClientID:               "klinik-pkp-web",
+					ApplicationCode:        "klinik_pkp",
+					RedirectURIs:           []string{"http://localhost:3000/auth/sso/callback"},
+					PostLogoutRedirectURIs: []string{"http://localhost:3000/login"},
+				},
+			},
+			SessionTTL: time.Hour, CodeTTL: 3 * time.Minute,
 			EncryptionKey: base64.StdEncoding.EncodeToString([]byte("01234567890123456789012345678901")),
 		},
 	)
@@ -132,6 +152,68 @@ func newBrowserSSOTestService(t *testing.T) (*BrowserSSOService, *fakeBrowserSSO
 		t.Fatalf("create service: %v", err)
 	}
 	return service, store, auth, issuer, apps, enrollments
+}
+
+func validKlinikAuthorizeRequest() models.BrowserSSOAuthorizeRequest {
+	request := validAuthorizeRequest()
+	request.ClientID = "klinik-pkp-web"
+	request.RedirectURI = "http://localhost:3000/auth/sso/callback"
+	return request
+}
+
+func TestBrowserSSOClientRegistryValidation(t *testing.T) {
+	clients := []BrowserSSOClient{
+		{
+			ClientID:               " silapet-web ",
+			ApplicationCode:        " SILAPET ",
+			RedirectURIs:           []string{" http://localhost:8081/auth/sso/callback "},
+			PostLogoutRedirectURIs: []string{" http://localhost:8081/login "},
+		},
+		{
+			ClientID:               "klinik-pkp-web",
+			ApplicationCode:        "klinik_pkp",
+			RedirectURIs:           []string{"http://localhost:3000/auth/sso/callback"},
+			PostLogoutRedirectURIs: []string{"http://localhost:3000/login"},
+		},
+	}
+	registry, err := buildBrowserSSOClientRegistry(clients)
+	if err != nil || len(registry) != 2 || registry["silapet-web"].applicationCode != "silapet" ||
+		registry["klinik-pkp-web"].applicationCode != "klinik_pkp" {
+		t.Fatalf("two-client registry failed: %#v, %v", registry, err)
+	}
+
+	tests := []struct {
+		name    string
+		clients []BrowserSSOClient
+	}{
+		{name: "duplicate client", clients: append(clients, clients[0])},
+		{name: "empty client", clients: []BrowserSSOClient{{
+			ApplicationCode: "silapet", RedirectURIs: []string{"http://localhost/callback"},
+			PostLogoutRedirectURIs: []string{"http://localhost/login"},
+		}}},
+		{name: "empty application", clients: []BrowserSSOClient{{
+			ClientID: "client", RedirectURIs: []string{"http://localhost/callback"},
+			PostLogoutRedirectURIs: []string{"http://localhost/login"},
+		}}},
+		{name: "relative redirect", clients: []BrowserSSOClient{{
+			ClientID: "client", ApplicationCode: "app", RedirectURIs: []string{"/callback"},
+			PostLogoutRedirectURIs: []string{"http://localhost/login"},
+		}}},
+		{name: "wildcard redirect", clients: []BrowserSSOClient{{
+			ClientID: "client", ApplicationCode: "app", RedirectURIs: []string{"https://*.example.com/callback"},
+			PostLogoutRedirectURIs: []string{"http://localhost/login"},
+		}}},
+		{name: "empty post logout", clients: []BrowserSSOClient{{
+			ClientID: "client", ApplicationCode: "app", RedirectURIs: []string{"http://localhost/callback"},
+		}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := buildBrowserSSOClientRegistry(test.clients); err == nil {
+				t.Fatal("invalid client registry was accepted")
+			}
+		})
+	}
 }
 
 func validAuthorizeRequest() models.BrowserSSOAuthorizeRequest {
@@ -144,6 +226,11 @@ func validAuthorizeRequest() models.BrowserSSOAuthorizeRequest {
 
 func TestBrowserSSOAuthorizeValidation(t *testing.T) {
 	service, _, _, _, _, _ := newBrowserSSOTestService(t)
+	for _, request := range []models.BrowserSSOAuthorizeRequest{validAuthorizeRequest(), validKlinikAuthorizeRequest()} {
+		if err := service.ValidateAuthorizeRequest(request); err != nil {
+			t.Fatalf("registered client request rejected: %#v: %v", request, err)
+		}
+	}
 	tests := []struct {
 		name   string
 		mutate func(*models.BrowserSSOAuthorizeRequest)
@@ -152,6 +239,10 @@ func TestBrowserSSOAuthorizeValidation(t *testing.T) {
 		{"invalid redirect", func(r *models.BrowserSSOAuthorizeRequest) { r.RedirectURI = "https://evil.example/callback" }},
 		{"missing state", func(r *models.BrowserSSOAuthorizeRequest) { r.State = "" }},
 		{"non S256", func(r *models.BrowserSSOAuthorizeRequest) { r.CodeChallengeMethod = "plain" }},
+		{"silapet with klinik redirect", func(r *models.BrowserSSOAuthorizeRequest) { r.RedirectURI = "http://localhost:3000/auth/sso/callback" }},
+		{"klinik with silapet redirect", func(r *models.BrowserSSOAuthorizeRequest) {
+			r.ClientID = "klinik-pkp-web"
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -169,6 +260,9 @@ func TestBrowserSSOPostLogoutRedirectValidation(t *testing.T) {
 	if err := service.ValidatePostLogoutRedirect("silapet-web", "http://localhost:8081/login"); err != nil {
 		t.Fatalf("registered post-logout redirect rejected: %v", err)
 	}
+	if err := service.ValidatePostLogoutRedirect("klinik-pkp-web", "http://localhost:3000/login"); err != nil {
+		t.Fatalf("registered Klinik post-logout redirect rejected: %v", err)
+	}
 	if err := service.ValidatePostLogoutRedirect("", ""); err != nil {
 		t.Fatalf("direct Central logout rejected: %v", err)
 	}
@@ -180,10 +274,51 @@ func TestBrowserSSOPostLogoutRedirectValidation(t *testing.T) {
 		{"silapet-web", "http://localhost:8081/other"},
 		{"silapet-web", "https://evil.example/login"},
 		{"", "http://localhost:8081/login"},
+		{"silapet-web", "http://localhost:3000/login"},
+		{"klinik-pkp-web", "http://localhost:8081/login"},
 	} {
 		if !errors.Is(service.ValidatePostLogoutRedirect(test.clientID, test.redirect), ErrInvalidAuthorizeRequest) {
 			t.Fatalf("invalid post-logout redirect accepted: %#v", test)
 		}
+	}
+}
+
+func TestBrowserSSOAuthorizeUsesResolvedClientApplication(t *testing.T) {
+	service, store, _, _, apps, enrollments := newBrowserSSOTestService(t)
+	store.session = &models.BrowserSSOSession{
+		ID: "session", TokenHash: hashOpaqueToken("cookie"), AuthUserID: "auth", AppUserID: "user",
+	}
+
+	for _, test := range []struct {
+		name            string
+		request         models.BrowserSSOAuthorizeRequest
+		applicationCode string
+	}{
+		{name: "silapet", request: validAuthorizeRequest(), applicationCode: "silapet"},
+		{name: "klinik", request: validKlinikAuthorizeRequest(), applicationCode: "klinik_pkp"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			apps.requestedCode = nil
+			result, err := service.Authorize(context.Background(), test.request, "cookie")
+			if err != nil || result.Code == "" {
+				t.Fatalf("authorize failed: %#v %v", result, err)
+			}
+			if len(apps.requestedCode) != 1 || apps.requestedCode[0] != test.applicationCode {
+				t.Fatalf("membership checked wrong application: %#v", apps.requestedCode)
+			}
+		})
+	}
+
+	apps.application = nil
+	apps.err = ErrApplicationMembershipUnavailable
+	enrollments.result = &models.ApplicationEnrollmentResult{Status: models.MembershipStatusPending}
+	enrollments.requestedCode = nil
+	result, err := service.Authorize(context.Background(), validKlinikAuthorizeRequest(), "cookie")
+	if err != nil || result.Status != browserSSOStatusPending {
+		t.Fatalf("Klinik auto-enrollment failed: %#v %v", result, err)
+	}
+	if len(enrollments.requestedCode) != 1 || enrollments.requestedCode[0] != "klinik_pkp" {
+		t.Fatalf("auto-enrollment used wrong application: %#v", enrollments.requestedCode)
 	}
 }
 
@@ -277,5 +412,67 @@ func TestBrowserSSOExchangeRejectsExpiredWrongBindingsAndPKCE(t *testing.T) {
 	}
 	if store.consumed {
 		t.Fatal("wrong PKCE verifier must not consume the authorization code")
+	}
+}
+
+func TestBrowserSSOExchangeIsolatedByClientAndApplication(t *testing.T) {
+	service, store, _, issuer, apps, _ := newBrowserSSOTestService(t)
+	verifier := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+	store.session = &models.BrowserSSOSession{ID: "session", AuthUserID: "auth", AppUserID: "app-user-id"}
+	issuer.session = &models.SupabaseSession{
+		AccessToken: "access", RefreshToken: "refresh", User: models.SupabaseAuthUser{ID: "auth"},
+	}
+	apps.byCode = map[string]*models.ApplicationContext{
+		"silapet":    {Application: "silapet", Status: models.MembershipStatusApproved},
+		"klinik_pkp": {Application: "klinik_pkp", Status: models.MembershipStatusApproved},
+	}
+
+	for _, test := range []struct {
+		name            string
+		code            string
+		clientID        string
+		redirectURI     string
+		applicationCode string
+		wrongClientID   string
+		wrongRedirect   string
+	}{
+		{
+			name: "silapet", code: "silapet-code", clientID: "silapet-web",
+			redirectURI: "http://localhost:8081/auth/sso/callback", applicationCode: "silapet",
+			wrongClientID: "klinik-pkp-web", wrongRedirect: "http://localhost:3000/auth/sso/callback",
+		},
+		{
+			name: "klinik", code: "klinik-code", clientID: "klinik-pkp-web",
+			redirectURI: "http://localhost:3000/auth/sso/callback", applicationCode: "klinik_pkp",
+			wrongClientID: "silapet-web", wrongRedirect: "http://localhost:8081/auth/sso/callback",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store.consumed = false
+			store.code = &models.BrowserSSOAuthorizationCode{
+				CodeHash: hashOpaqueToken(test.code), BrowserSessionID: "session", ClientID: test.clientID,
+				AuthUserID: "auth", AppUserID: "app-user-id", RedirectURI: test.redirectURI,
+				CodeChallenge: pkceChallenge(verifier), ExpiresAt: time.Now().Add(time.Minute),
+			}
+			if _, err := service.Exchange(
+				context.Background(), test.code, test.wrongClientID, test.wrongRedirect, verifier,
+			); !errors.Is(err, ErrInvalidAuthorizationCode) {
+				t.Fatalf("cross-client exchange was not rejected: %v", err)
+			}
+			if store.consumed {
+				t.Fatal("cross-client exchange consumed authorization code")
+			}
+
+			apps.requestedCode = nil
+			result, err := service.Exchange(
+				context.Background(), test.code, test.clientID, test.redirectURI, verifier,
+			)
+			if err != nil || result == nil || result.Session.AccessToken != "access" {
+				t.Fatalf("correct client exchange failed: %#v %v", result, err)
+			}
+			if len(apps.requestedCode) != 1 || apps.requestedCode[0] != test.applicationCode {
+				t.Fatalf("exchange checked wrong application: %#v", apps.requestedCode)
+			}
+		})
 	}
 }

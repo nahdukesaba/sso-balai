@@ -30,6 +30,7 @@ func NewAccountPortalService(
 	browser *BrowserSSOService,
 	applications AccountPortalApplicationStore,
 	silapetLaunchURL string,
+	klinikLaunchURL string,
 ) (*AccountPortalService, error) {
 	if browser == nil || applications == nil {
 		return nil, errors.New("account portal dependencies are required")
@@ -37,6 +38,10 @@ func NewAccountPortalService(
 	silapetLaunchURL = strings.TrimSpace(silapetLaunchURL)
 	if !validPortalLaunchURL(silapetLaunchURL) {
 		return nil, errors.New("PORTAL_SILAPET_LAUNCH_URL must be an absolute HTTP(S) URL")
+	}
+	klinikLaunchURL = strings.TrimSpace(klinikLaunchURL)
+	if !validPortalLaunchURL(klinikLaunchURL) {
+		return nil, errors.New("PORTAL_KLINIK_LAUNCH_URL must be an absolute HTTP(S) URL")
 	}
 	return &AccountPortalService{
 		browser:      browser,
@@ -47,11 +52,19 @@ func NewAccountPortalService(
 				Description: "Layanan peminjaman fasilitas dan kendaraan Balai.",
 				LaunchURL:   silapetLaunchURL,
 			},
+			models.ApplicationCodeKlinikPKP: {
+				Name:        "Klinik PKP",
+				Description: "Portal layanan informasi, konsultasi, dan pendampingan teknis BP3KP Sumatera II untuk sektor perumahan dan kawasan permukiman.",
+				LaunchURL:   klinikLaunchURL,
+			},
 		},
 	}, nil
 }
 
 func validPortalLaunchURL(value string) bool {
+	if strings.ContainsAny(value, "*#") {
+		return false
+	}
 	parsed, err := url.ParseRequestURI(value)
 	if err != nil || parsed.Host == "" || parsed.User != nil {
 		return false
