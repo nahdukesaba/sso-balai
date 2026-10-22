@@ -319,7 +319,7 @@ func membershipLoginStatusError(
 		return ErrAccountRejected
 
 	case models.MembershipStatusDisabled:
-		return ErrAccountUnavailable
+		return ErrAccountDisabled
 
 	default:
 		return ErrAccountUnavailable

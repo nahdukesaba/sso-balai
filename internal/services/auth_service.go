@@ -12,6 +12,7 @@ import (
 var (
 	ErrAccountPending               = errors.New("account is pending approval")
 	ErrAccountRejected              = errors.New("account is rejected")
+	ErrAccountDisabled              = errors.New("account is disabled")
 	ErrAccountUnavailable           = errors.New("account is unavailable")
 	ErrAccountAlreadyExists         = errors.New("central account already exists")
 	ErrRegistrationIdentityConflict = errors.New("central identity conflict")

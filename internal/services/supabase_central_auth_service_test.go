@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/nahdukesaba/sso-balai/internal/models"
@@ -168,6 +169,25 @@ type fakeSupabaseAuthApplications struct {
 	lookupCalls     int
 }
 
+type fakeSupabaseLoginEnrollments struct {
+	result          *models.ApplicationEnrollmentResult
+	err             error
+	calls           int
+	appUserID       string
+	applicationCode string
+}
+
+func (f *fakeSupabaseLoginEnrollments) Request(
+	_ context.Context,
+	appUserID string,
+	applicationCode string,
+) (*models.ApplicationEnrollmentResult, error) {
+	f.calls++
+	f.appUserID = appUserID
+	f.applicationCode = applicationCode
+	return f.result, f.err
+}
+
 func (f *fakeSupabaseAuthApplications) GetByAppUserID(
 	_ context.Context,
 	appUserID string,
@@ -303,10 +323,27 @@ func newSupabaseAuthFacade(
 	applications SupabaseAuthApplicationResolver,
 	identities SupabaseAuthIdentityLoader,
 ) *AuthService {
+	return newSupabaseAuthFacadeWithEnrollment(
+		auth,
+		users,
+		applications,
+		nil,
+		identities,
+	)
+}
+
+func newSupabaseAuthFacadeWithEnrollment(
+	auth SupabaseAuthentication,
+	users SupabaseAuthUserStore,
+	applications SupabaseAuthApplicationResolver,
+	enrollments RequestAccessEnrollmentService,
+	identities SupabaseAuthIdentityLoader,
+) *AuthService {
 	active := NewSupabaseCentralAuthService(
 		auth,
 		users,
 		applications,
+		enrollments,
 		identities,
 		nil,
 		nil,
@@ -431,10 +468,12 @@ func TestSupabaseLoginRejectsUnknownAuthUserID(t *testing.T) {
 			},
 		},
 	}
-	service := newSupabaseAuthFacade(
+	enrollments := &fakeSupabaseLoginEnrollments{}
+	service := newSupabaseAuthFacadeWithEnrollment(
 		auth,
 		&fakeSupabaseAuthUsers{user: user},
 		&fakeSupabaseAuthApplications{},
+		enrollments,
 		&fakeSupabaseAuthIdentities{},
 	)
 
@@ -450,6 +489,9 @@ func TestSupabaseLoginRejectsUnknownAuthUserID(t *testing.T) {
 
 	if auth.signOutCalls != 1 || auth.signOutToken != "supabase-access" {
 		t.Fatal("unmapped Supabase session was not signed out")
+	}
+	if enrollments.calls != 0 {
+		t.Fatal("unknown auth user created an application membership")
 	}
 }
 
@@ -468,6 +510,11 @@ func TestSupabaseLoginMembershipStatus(t *testing.T) {
 			name:        "rejected",
 			status:      models.MembershipStatusRejected,
 			expectedErr: ErrAccountRejected,
+		},
+		{
+			name:        "disabled",
+			status:      models.MembershipStatusDisabled,
+			expectedErr: ErrAccountDisabled,
 		},
 	}
 
@@ -509,6 +556,182 @@ func TestSupabaseLoginMembershipStatus(t *testing.T) {
 				t.Fatal("denied Supabase session was not signed out")
 			}
 		})
+	}
+}
+
+func TestSupabaseLoginAutoEnrollsMissingMembershipAsPending(t *testing.T) {
+	tests := []struct {
+		name    string
+		outcome models.ApplicationEnrollmentOutcome
+	}{
+		{
+			name:    "first login creates membership",
+			outcome: models.ApplicationEnrollmentCreated,
+		},
+		{
+			name:    "soft deleted membership reopens",
+			outcome: models.ApplicationEnrollmentReopened,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			user, identity := mappedSupabaseUser()
+			auth := &fakeSupabaseAuthentication{
+				signInSession: &models.SupabaseSession{
+					AccessToken:  "temporary-access",
+					RefreshToken: "temporary-refresh",
+					User: models.SupabaseAuthUser{
+						ID: *user.AuthUserID,
+					},
+				},
+			}
+			enrollments := &fakeSupabaseLoginEnrollments{
+				result: &models.ApplicationEnrollmentResult{
+					Application: models.ApplicationCodeSilapet,
+					Status:      models.MembershipStatusPending,
+					Outcome:     test.outcome,
+				},
+			}
+			service := newSupabaseAuthFacadeWithEnrollment(
+				auth,
+				&fakeSupabaseAuthUsers{user: user},
+				&fakeSupabaseAuthApplications{
+					err: ErrApplicationMembershipUnavailable,
+				},
+				enrollments,
+				&fakeSupabaseAuthIdentities{identity: identity},
+			)
+
+			result, err := service.Login(
+				context.Background(),
+				user.Email,
+				"Password123!",
+				models.ApplicationCodeSilapet,
+			)
+			if !errors.Is(err, ErrAccountPending) || result != nil {
+				t.Fatalf("expected pending without a session, result=%#v err=%v", result, err)
+			}
+			if enrollments.calls != 1 || enrollments.appUserID != user.ID ||
+				enrollments.applicationCode != models.ApplicationCodeSilapet {
+
+				t.Fatal("missing membership was not delegated to the enrollment state machine")
+			}
+			if auth.signOutCalls != 1 || auth.signOutToken != "temporary-access" {
+				t.Fatal("temporary Supabase session was not locally cleaned up")
+			}
+		})
+	}
+}
+
+func TestSupabaseLoginExistingPendingDoesNotEnrollAgain(t *testing.T) {
+	user, identity := mappedSupabaseUser()
+	auth := &fakeSupabaseAuthentication{
+		signInSession: &models.SupabaseSession{
+			AccessToken: "temporary-access",
+			User:        models.SupabaseAuthUser{ID: *user.AuthUserID},
+		},
+	}
+	enrollments := &fakeSupabaseLoginEnrollments{}
+	service := newSupabaseAuthFacadeWithEnrollment(
+		auth,
+		&fakeSupabaseAuthUsers{user: user},
+		&fakeSupabaseAuthApplications{
+			context: &models.ApplicationContext{
+				ApplicationID: "application-1",
+				Role:          "user",
+				Status:        models.MembershipStatusPending,
+			},
+		},
+		enrollments,
+		&fakeSupabaseAuthIdentities{identity: identity},
+	)
+
+	result, err := service.Login(
+		context.Background(),
+		user.Email,
+		"Password123!",
+		models.ApplicationCodeSilapet,
+	)
+	if !errors.Is(err, ErrAccountPending) || result != nil {
+		t.Fatalf("expected existing pending result, result=%#v err=%v", result, err)
+	}
+	if enrollments.calls != 0 || auth.signOutCalls != 1 {
+		t.Fatal("existing pending membership was duplicated or session was not cleaned")
+	}
+}
+
+func TestSupabaseLoginInvalidCredentialsNeverAutoEnroll(t *testing.T) {
+	user, identity := mappedSupabaseUser()
+	enrollments := &fakeSupabaseLoginEnrollments{}
+	service := newSupabaseAuthFacadeWithEnrollment(
+		&fakeSupabaseAuthentication{signInErr: ErrInvalidCredentials},
+		&fakeSupabaseAuthUsers{user: user},
+		&fakeSupabaseAuthApplications{err: ErrApplicationMembershipUnavailable},
+		enrollments,
+		&fakeSupabaseAuthIdentities{identity: identity},
+	)
+
+	result, err := service.Login(
+		context.Background(),
+		user.Email,
+		"wrong-password",
+		models.ApplicationCodeSilapet,
+	)
+	if !errors.Is(err, ErrInvalidCredentials) || result != nil {
+		t.Fatalf("expected invalid credentials, result=%#v err=%v", result, err)
+	}
+	if enrollments.calls != 0 {
+		t.Fatal("invalid credentials created an application membership")
+	}
+}
+
+func TestSupabaseConcurrentFirstLoginKeepsOneLogicalMembership(t *testing.T) {
+	user, identity := mappedSupabaseUser()
+	store := &concurrentEnrollmentStore{}
+	service := newSupabaseAuthFacadeWithEnrollment(
+		&fakeSupabaseAuthentication{
+			signInSession: &models.SupabaseSession{
+				AccessToken: "temporary-access",
+				User:        models.SupabaseAuthUser{ID: *user.AuthUserID},
+			},
+		},
+		&fakeSupabaseAuthUsers{user: user},
+		&fakeSupabaseAuthApplications{err: ErrApplicationMembershipUnavailable},
+		store,
+		&fakeSupabaseAuthIdentities{identity: identity},
+	)
+
+	const workers = 12
+	errorsByWorker := make(chan error, workers)
+	var wait sync.WaitGroup
+	for range workers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			result, err := service.Login(
+				context.Background(),
+				user.Email,
+				"Password123!",
+				models.ApplicationCodeSilapet,
+			)
+			if result != nil || !errors.Is(err, ErrAccountPending) {
+				errorsByWorker <- errors.New("concurrent login did not return pending without session")
+				return
+			}
+			errorsByWorker <- nil
+		}()
+	}
+	wait.Wait()
+	close(errorsByWorker)
+
+	for err := range errorsByWorker {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if store.created != 1 {
+		t.Fatalf("expected one logical membership creation, got %d", store.created)
 	}
 }
 
@@ -669,6 +892,7 @@ func newLegacyMigrationFacade(
 		auth,
 		users,
 		applications,
+		nil,
 		identities,
 		credentials,
 		admin,

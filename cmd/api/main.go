@@ -60,6 +60,11 @@ func main() {
 		credentialRepository,
 	)
 
+	applicationEnrollmentService :=
+		services.NewApplicationEnrollmentService(
+			applicationEnrollmentRepository,
+		)
+
 	supabaseAuthService, err := services.NewSupabaseAuthService(
 		cfg.SupabaseURL,
 		cfg.SupabasePublicKey,
@@ -96,6 +101,7 @@ func main() {
 			supabaseAuthService,
 			userRepository,
 			applicationContextService,
+			applicationEnrollmentService,
 			identityService,
 			credentialService,
 			supabaseAdminService,
@@ -120,11 +126,6 @@ func main() {
 		pegawaiRepository,
 		klinikUserRepository,
 	)
-
-	applicationEnrollmentService :=
-		services.NewApplicationEnrollmentService(
-			applicationEnrollmentRepository,
-		)
 
 	requestAccessService :=
 		services.NewCentralRequestAccessService(

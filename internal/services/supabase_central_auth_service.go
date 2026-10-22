@@ -142,6 +142,7 @@ type SupabaseCentralAuthService struct {
 	auth         SupabaseAuthentication
 	users        SupabaseAuthUserStore
 	applications SupabaseAuthApplicationResolver
+	enrollments  RequestAccessEnrollmentService
 	identities   SupabaseAuthIdentityLoader
 	credentials  LegacyPasswordVerifier
 	admin        LegacyMigrationAdmin
@@ -151,6 +152,7 @@ func NewSupabaseCentralAuthService(
 	auth SupabaseAuthentication,
 	users SupabaseAuthUserStore,
 	applications SupabaseAuthApplicationResolver,
+	enrollments RequestAccessEnrollmentService,
 	identities SupabaseAuthIdentityLoader,
 	credentials LegacyPasswordVerifier,
 	admin LegacyMigrationAdmin,
@@ -159,6 +161,7 @@ func NewSupabaseCentralAuthService(
 		auth:         auth,
 		users:        users,
 		applications: applications,
+		enrollments:  enrollments,
 		identities:   identities,
 		credentials:  credentials,
 		admin:        admin,
@@ -254,16 +257,39 @@ func (s *SupabaseCentralAuthService) signInAndComplete(
 		application,
 	)
 	if err != nil {
-		s.signOutQuietly(session.AccessToken)
-
 		switch {
 		case errors.Is(err, ErrApplicationUnavailable):
+			s.signOutQuietly(session.AccessToken)
 			return nil, ErrUnsupportedApplication
 
 		case errors.Is(err, ErrApplicationMembershipUnavailable):
-			return nil, ErrAccountUnavailable
+			if enrollmentErr := s.enrollMissingApplication(
+				ctx,
+				user.ID,
+				application,
+			); enrollmentErr != nil {
+				s.signOutQuietly(session.AccessToken)
+				return nil, enrollmentErr
+			}
+
+			// An approved result is only possible when another request changed
+			// the membership after the initial lookup. Resolve it again so an
+			// existing approved role (including admin) remains authoritative.
+			appContext, err = s.applications.GetByAppUserID(
+				ctx,
+				user.ID,
+				application,
+			)
+			if err != nil {
+				s.signOutQuietly(session.AccessToken)
+				return nil, fmt.Errorf(
+					"resolve enrolled Supabase login application: %w",
+					err,
+				)
+			}
 
 		default:
+			s.signOutQuietly(session.AccessToken)
 			return nil, fmt.Errorf(
 				"resolve Supabase login application: %w",
 				err,
@@ -294,6 +320,42 @@ func (s *SupabaseCentralAuthService) signInAndComplete(
 		Session:  session,
 		Identity: identity,
 	}, nil
+}
+
+func (s *SupabaseCentralAuthService) enrollMissingApplication(
+	ctx context.Context,
+	appUserID string,
+	application string,
+) error {
+	if s.enrollments == nil {
+		return ErrAuthUnavailable
+	}
+
+	result, err := s.enrollments.Request(ctx, appUserID, application)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrApplicationEnrollmentUnavailable):
+			return ErrUnsupportedApplication
+		case errors.Is(err, ErrApplicationEnrollmentBlocked):
+			return ErrAccountRejected
+		default:
+			return fmt.Errorf("auto-enroll application access: %w", err)
+		}
+	}
+
+	if result == nil {
+		return ErrAuthUnavailable
+	}
+
+	if result.Status == models.MembershipStatusPending {
+		return ErrAccountPending
+	}
+
+	if result.Status != models.MembershipStatusApproved {
+		return ErrAccountUnavailable
+	}
+
+	return nil
 }
 
 func (s *SupabaseCentralAuthService) migrateLegacyAndSignIn(

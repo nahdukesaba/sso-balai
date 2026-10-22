@@ -354,7 +354,7 @@ func TestCentralLoginMembershipStatus(
 		{
 			name:   "disabled",
 			status: models.MembershipStatusDisabled,
-			err:    ErrAccountUnavailable,
+			err:    ErrAccountDisabled,
 		},
 	}
 
