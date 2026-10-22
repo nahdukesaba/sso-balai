@@ -7,7 +7,7 @@ const resetPasswordPageHTML = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Reset Password Central SSO</title>
+  <title>Reset password - Akun Balai</title>
   <style>
     :root { color-scheme: light; font-family: system-ui, sans-serif; }
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f4f6f8; color: #17212b; }
@@ -22,6 +22,7 @@ const resetPasswordPageHTML = `<!doctype html>
 </head>
 <body>
   <main>
+    <p>BP3KP Sumatera II · Akun Balai</p>
     <h1>Reset password</h1>
     <form id="reset-form">
       <label for="password">Password baru</label>

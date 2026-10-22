@@ -25,11 +25,12 @@ type handlerBrowserSSOStore struct {
 	unrelatedActive bool
 }
 
-func (s *handlerBrowserSSOStore) CreateSession(context.Context, *models.BrowserSSOSession) error {
+func (s *handlerBrowserSSOStore) CreateSession(_ context.Context, session *models.BrowserSSOSession) error {
+	s.session = session
 	return nil
 }
 func (s *handlerBrowserSSOStore) GetActiveSessionByTokenHash(context.Context, []byte) (*models.BrowserSSOSession, error) {
-	if s.revoked {
+	if s.revoked || (s.session != nil && !s.session.ExpiresAt.IsZero() && !s.session.ExpiresAt.After(time.Now())) {
 		return nil, nil
 	}
 	return s.session, nil
@@ -90,7 +91,9 @@ func (handlerBrowserSSOEnrollments) Request(context.Context, string, string) (*m
 type handlerBrowserSSOIdentities struct{}
 
 func (handlerBrowserSSOIdentities) GetByUserID(context.Context, string) (*models.Identity, error) {
-	return &models.Identity{}, nil
+	return &models.Identity{User: &models.AppUser{
+		ID: "app-user", Email: "person@example.com", FullName: "Pegawai Contoh",
+	}}, nil
 }
 
 func newHandlerBrowserSSO(t *testing.T, session *models.BrowserSSOSession) *BrowserSSOHandler {

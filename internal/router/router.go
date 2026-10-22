@@ -14,9 +14,13 @@ func Register(
 	browserSSOHandlers ...*handlers.BrowserSSOHandler,
 ) {
 	app.Get("/reset-password", authHandler.ResetPasswordPage)
+	app.Get("/forgot-password", authHandler.ForgotPasswordPage)
 
 	if len(browserSSOHandlers) > 0 && browserSSOHandlers[0] != nil {
 		browserSSOHandler := browserSSOHandlers[0]
+		app.Get("/", browserSSOHandler.PortalHome)
+		app.Get("/account/login", browserSSOHandler.PortalLoginPage)
+		app.Post("/account/login", browserSSOHandler.PortalLoginSubmit)
 		app.Get("/authorize", browserSSOHandler.Authorize)
 		app.Get("/login", browserSSOHandler.LoginPage)
 		app.Post("/login", browserSSOHandler.LoginSubmit)

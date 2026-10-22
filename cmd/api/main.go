@@ -172,6 +172,7 @@ func main() {
 	)
 
 	var browserSSOService *services.BrowserSSOService
+	var accountPortalService *services.AccountPortalService
 	if cfg.SSOBrowserEnabled {
 		browserSSOSessionIssuer, issuerErr :=
 			services.NewSupabaseBrowserSSOSessionIssuer(
@@ -202,6 +203,14 @@ func main() {
 		if err != nil {
 			log.Fatalf("failed to initialize browser SSO: %v", err)
 		}
+		accountPortalService, err = services.NewAccountPortalService(
+			browserSSOService,
+			applicationRepository,
+			cfg.PortalSilapetLaunchURL,
+		)
+		if err != nil {
+			log.Fatalf("failed to initialize account portal: %v", err)
+		}
 	}
 
 	browserSSOHandler := handlers.NewBrowserSSOHandler(
@@ -210,6 +219,7 @@ func main() {
 		cfg.SSOBrowserCookieSameSite,
 		cfg.SSOBrowserSessionTTL,
 	)
+	browserSSOHandler.SetAccountPortalService(accountPortalService)
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 	app := fiber.New()
 

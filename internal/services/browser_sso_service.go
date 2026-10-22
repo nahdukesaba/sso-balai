@@ -428,6 +428,37 @@ func (s *BrowserSSOService) HasActiveBrowserSession(ctx context.Context, rawToke
 	return session != nil, nil
 }
 
+// ResolveBrowserIdentity validates the opaque browser session and returns the
+// current internal identity. Missing, expired, revoked, or stale mappings are
+// treated as logged out.
+func (s *BrowserSSOService) ResolveBrowserIdentity(
+	ctx context.Context,
+	rawToken string,
+) (*models.Identity, error) {
+	if strings.TrimSpace(rawToken) == "" {
+		return nil, nil
+	}
+	session, err := s.store.GetActiveSessionByTokenHash(ctx, hashOpaqueToken(rawToken))
+	if err != nil || session == nil {
+		return nil, err
+	}
+	user, err := s.users.GetByAuthUserID(ctx, session.AuthUserID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil || user.ID != session.AppUserID {
+		return nil, nil
+	}
+	identity, err := s.identities.GetByUserID(ctx, session.AppUserID)
+	if err != nil {
+		return nil, err
+	}
+	if identity == nil || identity.User == nil || identity.User.ID != session.AppUserID {
+		return nil, nil
+	}
+	return identity, nil
+}
+
 func (s *BrowserSSOService) seal(plaintext, additionalData []byte) ([]byte, error) {
 	nonce := make([]byte, s.aead.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {

@@ -26,6 +26,7 @@ type Config struct {
 	SSOSilapetApplicationCode   string
 	SSOSilapetRedirectURIs      []string
 	SSOSilapetPostLogoutURIs    []string
+	PortalSilapetLaunchURL      string
 
 	SupabaseURL       string
 	SupabasePublicKey string
@@ -59,6 +60,7 @@ func Load() (*Config, error) {
 		SSOSilapetApplicationCode: getEnv("SSO_SILAPET_APPLICATION_CODE", "silapet"),
 		SSOSilapetRedirectURIs:    splitCSV(os.Getenv("SSO_SILAPET_REDIRECT_URIS")),
 		SSOSilapetPostLogoutURIs:  splitCSV(os.Getenv("SSO_SILAPET_POST_LOGOUT_REDIRECT_URIS")),
+		PortalSilapetLaunchURL:    getEnv("PORTAL_SILAPET_LAUNCH_URL", "http://127.0.0.1:5173/"),
 
 		SupabaseURL: os.Getenv("SUPABASE_URL"),
 

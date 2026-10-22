@@ -69,3 +69,52 @@ LIMIT 1
 
 	return &application, nil
 }
+
+func (r *ApplicationRepository) ListForPortalUser(
+	ctx context.Context,
+	appUserID string,
+) ([]models.PortalApplicationAccess, error) {
+	appUserID = strings.TrimSpace(appUserID)
+	if appUserID == "" {
+		return nil, errors.New("app user ID is required")
+	}
+
+	rows, err := r.pool.Query(ctx, `
+SELECT
+    a.code,
+    a.name,
+    COALESCE(m.role, ''),
+    COALESCE(m.status, ''),
+    m.id IS NOT NULL
+FROM public.applications a
+LEFT JOIN public.app_memberships m
+    ON m.application_id = a.id
+   AND m.app_user_id = $1
+   AND m.deleted_at IS NULL
+WHERE a.is_active = true
+ORDER BY a.name ASC
+`, appUserID)
+	if err != nil {
+		return nil, fmt.Errorf("list portal applications: %w", err)
+	}
+	defer rows.Close()
+
+	applications := make([]models.PortalApplicationAccess, 0)
+	for rows.Next() {
+		var application models.PortalApplicationAccess
+		if err := rows.Scan(
+			&application.Code,
+			&application.Name,
+			&application.Role,
+			&application.Status,
+			&application.HasMembership,
+		); err != nil {
+			return nil, fmt.Errorf("scan portal application: %w", err)
+		}
+		applications = append(applications, application)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate portal applications: %w", err)
+	}
+	return applications, nil
+}

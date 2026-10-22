@@ -23,6 +23,14 @@ Browser SSO is an optional authorization-code flow for registered Balai clients.
 
 Only `code`, `state`, or a safe membership status is placed in the callback URL. Supabase access and refresh tokens never enter a redirect URL.
 
+## Central account portal
+
+When Browser SSO is enabled, Central also serves the public `GET /` **Akun Balai** portal. A logged-out visitor can use the CSRF-protected `GET/POST /account/login` form or open `GET /forgot-password`. Portal login reuses the Supabase-backed browser-session login and creates the same opaque `balai_sso_session`; it does not require membership in an application and does not alter the sealed-request contract of the existing `GET/POST /login` Browser SSO routes.
+
+For an active Central session, the portal resolves `auth_user_id` back to the current internal identity and lists active applications from `applications`, joined to that user's `app_memberships`. Friendly membership and role labels are rendered server-side. Only an approved SILAPET membership receives a launch link. The launch destination comes from `PORTAL_SILAPET_LAUNCH_URL`, never from browser input; other applications remain visible with their database name and membership status but are not launchable until their server-controlled metadata and Browser SSO integration are configured.
+
+Password recovery continues through the existing Supabase-owned `POST /api/v1/auth/forgot-password` flow, `PASSWORD_RECOVERY_REDIRECT_URL`, and `GET /reset-password`. Portal logout enters `GET /logout?portal=1`, preserves the existing confirmation and CSRF checks, revokes the current browser session on POST, clears its cookie, and returns safely to `/`.
+
 ## Session and logout semantics
 
 The Central cookie is opaque, `HttpOnly`, `Path=/`, configurable `SameSite`, and `Secure=true` by default. `SameSite=None` is rejected unless `Secure=true`. Local HTTP development must explicitly set `SSO_BROWSER_COOKIE_SECURE=false`; production must retain `true`.
@@ -54,5 +62,6 @@ login URI; direct Central cancel uses the existing `/logout?cancelled=1` state.
 - `SSO_SILAPET_APPLICATION_CODE`
 - `SSO_SILAPET_REDIRECT_URIS` (comma-separated exact allowlist)
 - `SSO_SILAPET_POST_LOGOUT_REDIRECT_URIS` (comma-separated exact allowlist)
+- `PORTAL_SILAPET_LAUNCH_URL` (absolute server-controlled HTTP(S) URL; use `http://127.0.0.1:5173/` for the local SILAPET frontend and configure the production URL in its environment)
 
-The feature is fail-closed and disabled by default. Apply migration `000006_create_browser_sso` only to the intended local environment before enabling it.
+The feature is fail-closed and disabled by default. The local portal is available at the Central listener (for the current local stack, `http://127.0.0.1:18082/`). Apply migration `000006_create_browser_sso` only to the intended local environment before enabling it. The account portal itself adds no migration.

@@ -19,13 +19,21 @@ const (
 	browserSSOSessionCookie = "balai_sso_session"
 	browserSSOCSRFCookie    = "balai_sso_csrf"
 	browserSSOLogoutCSRF    = "balai_sso_logout_csrf"
+	accountPortalLoginCSRF  = "balai_portal_login_csrf"
 )
 
 type BrowserSSOHandler struct {
 	service        *services.BrowserSSOService
+	portalService  *services.AccountPortalService
 	cookieSecure   bool
 	cookieSameSite string
 	sessionTTL     time.Duration
+}
+
+func (h *BrowserSSOHandler) SetAccountPortalService(service *services.AccountPortalService) {
+	if h != nil {
+		h.portalService = service
+	}
 }
 
 func NewBrowserSSOHandler(
@@ -151,6 +159,7 @@ func (h *BrowserSSOHandler) LogoutPage(c *fiber.Ctx) error {
 	}
 	clientID := strings.TrimSpace(c.Query("client_id"))
 	redirectURI := strings.TrimSpace(c.Query("post_logout_redirect_uri"))
+	portalReturn := c.Query("portal") == "1"
 	if err := h.service.ValidatePostLogoutRedirect(clientID, redirectURI); err != nil {
 		return browserSSOError(c, fiber.StatusBadRequest, "invalid_logout_request", "Invalid logout request.")
 	}
@@ -164,6 +173,9 @@ func (h *BrowserSSOHandler) LogoutPage(c *fiber.Ctx) error {
 	if !active {
 		if redirectURI != "" {
 			return c.Redirect(redirectURI, fiber.StatusSeeOther)
+		}
+		if portalReturn {
+			return c.Redirect("/", fiber.StatusSeeOther)
 		}
 		return h.renderLogoutState(
 			c,
@@ -187,7 +199,7 @@ func (h *BrowserSSOHandler) LogoutPage(c *fiber.Ctx) error {
 		return browserSSOError(c, fiber.StatusInternalServerError, "sso_unavailable", "Logout is unavailable.")
 	}
 	h.setCookie(c, browserSSOLogoutCSRF, csrf, 600, time.Time{})
-	return h.renderLogout(c, csrf, clientID, redirectURI)
+	return h.renderLogout(c, csrf, clientID, redirectURI, portalReturn)
 }
 
 func (h *BrowserSSOHandler) LogoutSubmit(c *fiber.Ctx) error {
@@ -201,6 +213,7 @@ func (h *BrowserSSOHandler) LogoutSubmit(c *fiber.Ctx) error {
 	}
 	clientID := strings.TrimSpace(c.FormValue("client_id"))
 	redirectURI := strings.TrimSpace(c.FormValue("post_logout_redirect_uri"))
+	portalReturn := c.FormValue("portal") == "1"
 	if err := h.service.ValidatePostLogoutRedirect(clientID, redirectURI); err != nil {
 		return browserSSOError(c, fiber.StatusBadRequest, "invalid_logout_request", "Invalid logout request.")
 	}
@@ -215,6 +228,9 @@ func (h *BrowserSSOHandler) LogoutSubmit(c *fiber.Ctx) error {
 	}
 	if redirectURI != "" {
 		return c.Redirect(redirectURI, fiber.StatusSeeOther)
+	}
+	if portalReturn {
+		return c.Redirect("/", fiber.StatusSeeOther)
 	}
 	return h.renderLogoutComplete(c)
 }
@@ -292,6 +308,7 @@ func (h *BrowserSSOHandler) renderLogout(
 	csrf string,
 	clientID string,
 	redirectURI string,
+	portalReturn bool,
 ) error {
 	formAction := "'self'"
 	if redirectURI != "" {
@@ -303,12 +320,19 @@ func (h *BrowserSSOHandler) renderLogout(
 	}
 	setBrowserSSOPageHeaders(c, formAction)
 	var output strings.Builder
+	cancelURL := firstNonEmptyString(redirectURI, "/logout?cancelled=1")
+	portal := ""
+	if portalReturn {
+		cancelURL = "/"
+		portal = "1"
+	}
 	if err := browserSSOLogoutTemplate.Execute(&output, struct {
 		CSRF        string
 		ClientID    string
 		RedirectURI string
 		CancelURL   string
-	}{csrf, clientID, redirectURI, firstNonEmptyString(redirectURI, "/logout?cancelled=1")}); err != nil {
+		Portal      string
+	}{csrf, clientID, redirectURI, cancelURL, portal}); err != nil {
 		return err
 	}
 	return c.SendString(output.String())
@@ -402,7 +426,7 @@ var browserSSOLoginTemplate = template.Must(template.New("browser-sso-login").Pa
 var browserSSOLogoutTemplate = template.Must(template.New("browser-sso-logout").Parse(`<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Keluar dari akun</title><style>:root{font-family:system-ui,sans-serif;color:#17212b}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f6f8}main{width:min(28rem,calc(100% - 2rem));padding:2rem;border-radius:.75rem;background:#fff;box-shadow:0 .5rem 2rem #1f29371a}h1{margin-top:0}form{margin-top:1.5rem}button,a{box-sizing:border-box;display:block;width:100%;padding:.75rem;border-radius:.4rem;text-align:center;font:inherit;text-decoration:none}button{border:0;background:#075985;color:#fff;cursor:pointer}a{margin-top:.75rem;border:1px solid #cbd5e1;color:#17212b}</style></head>
-<body><main><h1>Keluar dari akun</h1><p>Anda akan keluar dari akun pada browser ini.</p><form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><input type="hidden" name="post_logout_redirect_uri" value="{{.RedirectURI}}"><button type="submit">Keluar</button></form><a href="{{.CancelURL}}">Batal</a></main></body></html>`))
+<body><main><h1>Keluar dari akun</h1><p>Anda akan keluar dari akun pada browser ini.</p><form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><input type="hidden" name="post_logout_redirect_uri" value="{{.RedirectURI}}"><input type="hidden" name="portal" value="{{.Portal}}"><button type="submit">Keluar</button></form><a href="{{.CancelURL}}">Batal</a></main></body></html>`))
 
 var browserSSOLogoutStateTemplate = template.Must(template.New("browser-sso-logout-state").Parse(`<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
