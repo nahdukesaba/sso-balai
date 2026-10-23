@@ -7,47 +7,65 @@ import (
 	"strings"
 
 	"github.com/nahdukesaba/sso-balai/internal/models"
-	"github.com/nahdukesaba/sso-balai/internal/repository"
 )
 
 var ErrKlinikAccountUnavailable = errors.New("Klinik account unavailable")
 
+type KlinikIdentityStore interface {
+	GetByAppUserID(
+		context.Context,
+		string,
+	) (*models.KlinikIdentity, error)
+}
+
 type KlinikContextService struct {
-	klinikUserRepository *repository.KlinikUserRepository
+	identities KlinikIdentityStore
 }
 
 func NewKlinikContextService(
-	klinikUserRepository *repository.KlinikUserRepository,
+	identities KlinikIdentityStore,
 ) *KlinikContextService {
 	return &KlinikContextService{
-		klinikUserRepository: klinikUserRepository,
+		identities: identities,
 	}
 }
 
 func (s *KlinikContextService) GetByAppUserID(
 	ctx context.Context,
 	appUserID string,
-) (*models.KlinikUser, error) {
+) (*models.KlinikIdentity, error) {
 	appUserID = strings.TrimSpace(appUserID)
 
-	if appUserID == "" {
+	if appUserID == "" || s == nil || s.identities == nil {
 		return nil, ErrKlinikAccountUnavailable
 	}
 
-	user, err := s.klinikUserRepository.GetActiveByAppUserID(
+	identity, err := s.identities.GetByAppUserID(
 		ctx,
 		appUserID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"get Klinik context: %w",
+			"get canonical Klinik context: %w",
 			err,
 		)
 	}
 
-	if user == nil || !user.IsActive {
+	if identity == nil ||
+		identity.AppUserID != appUserID ||
+		strings.TrimSpace(identity.AuthUserID) == "" ||
+		identity.ApplicationCode != models.ApplicationCodeKlinikPKP ||
+		identity.Status != models.MembershipStatusApproved ||
+		!isKlinikRole(identity.Role) {
+
 		return nil, ErrKlinikAccountUnavailable
 	}
 
-	return user, nil
+	identity.Role = strings.ToLower(strings.TrimSpace(identity.Role))
+	return identity, nil
+}
+
+func isKlinikRole(role string) bool {
+	role = strings.ToLower(strings.TrimSpace(role))
+	return role == "admin" || role == "user"
 }

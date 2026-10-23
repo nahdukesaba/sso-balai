@@ -31,6 +31,8 @@ func main() {
 	userRepository := repository.NewUserRepository(db)
 	pegawaiRepository := repository.NewPegawaiRepository(db)
 	klinikUserRepository := repository.NewKlinikUserRepository(db)
+	klinikIdentityRepository :=
+		repository.NewKlinikIdentityRepository(db)
 	applicationRepository := repository.NewApplicationRepository(db)
 	membershipRepository := repository.NewMembershipRepository(db)
 	credentialRepository := repository.NewCredentialRepository(db)
@@ -49,7 +51,7 @@ func main() {
 	)
 
 	klinikContextService := services.NewKlinikContextService(
-		klinikUserRepository,
+		klinikIdentityRepository,
 	)
 
 	applicationContextService := services.NewApplicationContextService(

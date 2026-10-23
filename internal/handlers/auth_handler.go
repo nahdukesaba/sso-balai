@@ -88,9 +88,15 @@ type meResponse struct {
 }
 
 type klinikContextResponse struct {
-	ID    string `json:"id"`
-	Email string `json:"email"`
-	Role  string `json:"role"`
+	ID         string  `json:"id"`
+	AppUserID  string  `json:"appUserId"`
+	AuthUserID string  `json:"authUserId"`
+	Email      string  `json:"email"`
+	FullName   string  `json:"fullName"`
+	Phone      *string `json:"phone,omitempty"`
+	NIP        *string `json:"nip,omitempty"`
+	Role       string  `json:"role"`
+	Status     string  `json:"status"`
 }
 
 type userResponse struct {
@@ -770,37 +776,7 @@ func (h *AuthHandler) KlinikContext(c *fiber.Ctx) error {
 		})
 	}
 
-	appContext, err := h.applicationContextService.GetByAppUserID(
-		c.UserContext(),
-		identity.User.ID,
-		models.ApplicationCodeKlinikPKP,
-	)
-	if err != nil {
-		if errors.Is(err, services.ErrApplicationUnavailable) ||
-			errors.Is(err, services.ErrApplicationMembershipUnavailable) {
-
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"error":   "klinik_account_unavailable",
-				"message": "Pengguna tidak memiliki akses aktif ke Klinik PKP.",
-			})
-		}
-
-		return c.Status(
-			fiber.StatusInternalServerError,
-		).JSON(fiber.Map{
-			"error":   "internal_error",
-			"message": "Terjadi kesalahan pada server.",
-		})
-	}
-
-	if appContext.Status != models.MembershipStatusApproved {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error":   "klinik_account_unavailable",
-			"message": "Pengguna tidak memiliki akses aktif ke Klinik PKP.",
-		})
-	}
-
-	klinikUser, err := h.klinikContextService.GetByAppUserID(
+	klinikIdentity, err := h.klinikContextService.GetByAppUserID(
 		c.UserContext(),
 		identity.User.ID,
 	)
@@ -827,9 +803,15 @@ func (h *AuthHandler) KlinikContext(c *fiber.Ctx) error {
 
 	return c.Status(fiber.StatusOK).JSON(
 		klinikContextResponse{
-			ID:    klinikUser.ID,
-			Email: klinikUser.Email,
-			Role:  appContext.Role,
+			ID:         klinikIdentity.AppUserID,
+			AppUserID:  klinikIdentity.AppUserID,
+			AuthUserID: klinikIdentity.AuthUserID,
+			Email:      klinikIdentity.Email,
+			FullName:   klinikIdentity.FullName,
+			Phone:      klinikIdentity.Phone,
+			NIP:        klinikIdentity.NIP,
+			Role:       klinikIdentity.Role,
+			Status:     klinikIdentity.Status,
 		},
 	)
 }
