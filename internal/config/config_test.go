@@ -65,3 +65,54 @@ func TestValidateConfiguredHTTPURLs(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadSupabaseInviteRedirectURL(t *testing.T) {
+	originalDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(originalDirectory); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+
+	t.Setenv("DATABASE_URL", "postgres://local-test-only")
+	t.Setenv(
+		"SUPABASE_INVITE_REDIRECT_URL",
+		" http://127.0.0.1:18082/accept-invite ",
+	)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SupabaseInviteRedirectURL != "http://127.0.0.1:18082/accept-invite" {
+		t.Fatalf("unexpected invite redirect: %q", cfg.SupabaseInviteRedirectURL)
+	}
+}
+
+func TestLoadRejectsInvalidSupabaseInviteRedirectURL(t *testing.T) {
+	originalDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(originalDirectory); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+
+	t.Setenv("DATABASE_URL", "postgres://local-test-only")
+	t.Setenv("SUPABASE_INVITE_REDIRECT_URL", "javascript:alert(1)")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected invalid invite redirect to be rejected")
+	}
+}

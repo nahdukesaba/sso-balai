@@ -17,6 +17,7 @@ type Config struct {
 	DatabaseURL                 string
 	AuthAccessTokenSecret       string
 	PasswordRecoveryRedirectURL string
+	SupabaseInviteRedirectURL   string
 	SSOBrowserEnabled           bool
 	SSOBrowserSessionKey        string
 	SSOBrowserCookieSecure      bool
@@ -56,6 +57,10 @@ func Load() (*Config, error) {
 			"PASSWORD_RECOVERY_REDIRECT_URL",
 			"https://sso.bp3kpsumatera2.com/reset-password",
 		),
+		SupabaseInviteRedirectURL: strings.TrimSpace(getEnv(
+			"SUPABASE_INVITE_REDIRECT_URL",
+			"https://sso.bp3kpsumatera2.com/accept-invite",
+		)),
 		SSOBrowserEnabled:         getEnvBool("SSO_BROWSER_ENABLED", false),
 		SSOBrowserSessionKey:      os.Getenv("SSO_BROWSER_SESSION_KEY"),
 		SSOBrowserCookieSecure:    getEnvBool("SSO_BROWSER_COOKIE_SECURE", true),
@@ -93,6 +98,13 @@ func Load() (*Config, error) {
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")
+	}
+
+	if err := validateConfiguredHTTPURLs(
+		"SUPABASE_INVITE_REDIRECT_URL",
+		[]string{cfg.SupabaseInviteRedirectURL},
+	); err != nil {
+		return nil, err
 	}
 
 	if cfg.SSOBrowserEnabled {

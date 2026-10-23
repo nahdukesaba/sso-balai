@@ -15,6 +15,7 @@ func Register(
 ) {
 	app.Get("/reset-password", authHandler.ResetPasswordPage)
 	app.Get("/forgot-password", authHandler.ForgotPasswordPage)
+	app.Get("/accept-invite", authHandler.AcceptInvitePage)
 
 	if len(browserSSOHandlers) > 0 && browserSSOHandlers[0] != nil {
 		browserSSOHandler := browserSSOHandlers[0]
@@ -37,6 +38,7 @@ func Register(
 	auth.Post("/register", authHandler.Register)
 	auth.Post("/forgot-password", authHandler.ForgotPassword)
 	auth.Post("/reset-password", authHandler.ResetPassword)
+	auth.Post("/accept-invite", authHandler.AcceptInvite)
 	auth.Post("/request-access", authHandler.RequestAccess)
 	auth.Post("/refresh", authHandler.Refresh)
 	auth.Post("/logout", authHandler.Logout)

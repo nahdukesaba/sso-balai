@@ -28,7 +28,11 @@ func TestGenerateMagicLinkToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	service, err := NewSupabaseAdminService(server.URL, "service-role-test")
+	service, err := NewSupabaseAdminService(
+		server.URL,
+		"service-role-test",
+		"https://sso.example.test/accept-invite",
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

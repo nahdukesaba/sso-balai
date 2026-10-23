@@ -89,9 +89,21 @@ func main() {
 		)
 	}
 
+	inviteAcceptanceService, err :=
+		services.NewSupabaseInviteAcceptanceService(
+			supabaseAuthService,
+		)
+	if err != nil {
+		log.Fatalf(
+			"failed to initialize Supabase invite acceptance: %v",
+			err,
+		)
+	}
+
 	supabaseAdminService, err := services.NewSupabaseAdminService(
 		cfg.SupabaseURL,
 		cfg.SupabaseAdminKey,
+		cfg.SupabaseInviteRedirectURL,
 	)
 	if err != nil {
 		log.Fatalf(
@@ -158,6 +170,10 @@ func main() {
 
 	authService.SetPasswordRecoveryService(
 		passwordRecoveryService,
+	)
+
+	authService.SetInviteAcceptanceService(
+		inviteAcceptanceService,
 	)
 
 	authService.SetApplicationEnrollmentService(

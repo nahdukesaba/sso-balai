@@ -39,6 +39,7 @@ type AuthService struct {
 	activeAuthenticationService    ActiveAuthenticationService
 	passwordRecoveryService        PasswordRecoveryService
 	registrationService            RegistrationService
+	inviteAcceptanceService        InviteAcceptanceService
 }
 
 type RequestAccessEnrollment interface {
@@ -128,6 +129,12 @@ func (s *AuthService) SetRegistrationService(
 	service RegistrationService,
 ) {
 	s.registrationService = service
+}
+
+func (s *AuthService) SetInviteAcceptanceService(
+	service InviteAcceptanceService,
+) {
+	s.inviteAcceptanceService = service
 }
 
 // RegisterCentralIdentity creates a Supabase Auth identity together with the
@@ -311,6 +318,22 @@ func (s *AuthService) ResetPassword(
 	return s.passwordRecoveryService.Reset(
 		ctx,
 		tokenHash,
+		password,
+	)
+}
+
+func (s *AuthService) AcceptInvite(
+	ctx context.Context,
+	accessToken string,
+	password string,
+) error {
+	if s.inviteAcceptanceService == nil {
+		return ErrAuthUnavailable
+	}
+
+	return s.inviteAcceptanceService.Accept(
+		ctx,
+		accessToken,
 		password,
 	)
 }

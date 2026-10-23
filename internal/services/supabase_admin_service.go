@@ -20,9 +20,10 @@ var (
 )
 
 type SupabaseAdminService struct {
-	baseURL string
-	apiKey  string
-	client  *http.Client
+	baseURL           string
+	apiKey            string
+	inviteRedirectURL string
+	client            *http.Client
 }
 
 type createAuthUserRequest struct {
@@ -116,9 +117,11 @@ func (s *SupabaseAdminService) FindUserByEmail(
 func NewSupabaseAdminService(
 	baseURL string,
 	apiKey string,
+	inviteRedirectURL string,
 ) (*SupabaseAdminService, error) {
 	baseURL = strings.TrimSpace(baseURL)
 	apiKey = strings.TrimSpace(apiKey)
+	inviteRedirectURL = strings.TrimSpace(inviteRedirectURL)
 
 	if baseURL == "" {
 		return nil, errors.New("SUPABASE_URL is required")
@@ -128,9 +131,21 @@ func NewSupabaseAdminService(
 		return nil, ErrAdminKeyRequired
 	}
 
+	parsedRedirectURL, err := url.ParseRequestURI(inviteRedirectURL)
+	if err != nil || strings.ContainsAny(inviteRedirectURL, "*#") ||
+		parsedRedirectURL.Host == "" ||
+		parsedRedirectURL.User != nil || parsedRedirectURL.Fragment != "" ||
+		(parsedRedirectURL.Scheme != "http" && parsedRedirectURL.Scheme != "https") {
+
+		return nil, errors.New(
+			"SUPABASE_INVITE_REDIRECT_URL must be an absolute HTTP(S) URL",
+		)
+	}
+
 	return &SupabaseAdminService{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  apiKey,
+		baseURL:           strings.TrimRight(baseURL, "/"),
+		apiKey:            apiKey,
+		inviteRedirectURL: inviteRedirectURL,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -216,7 +231,10 @@ func (s *SupabaseAdminService) InviteUser(
 	if err != nil {
 		return nil, fmt.Errorf("marshal admin invite request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+"/auth/v1/invite", bytes.NewReader(body))
+	query := url.Values{}
+	query.Set("redirect_to", s.inviteRedirectURL)
+	endpoint := s.baseURL + "/auth/v1/invite?" + query.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create admin invite request: %w", err)
 	}

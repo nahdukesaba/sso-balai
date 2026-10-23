@@ -59,6 +59,11 @@ type resetPasswordRequest struct {
 	Password  string `json:"password"`
 }
 
+type acceptInviteRequest struct {
+	AccessToken string `json:"accessToken"`
+	Password    string `json:"password"`
+}
+
 type applicationEnrollmentRequest struct {
 	Application string `json:"application"`
 }
@@ -376,6 +381,39 @@ func (h *AuthHandler) ResetPassword(
 		fiber.StatusOK,
 	).JSON(fiber.Map{
 		"message": "Password berhasil diperbarui. Silakan masuk kembali.",
+	})
+}
+
+func (h *AuthHandler) AcceptInvite(
+	c *fiber.Ctx,
+) error {
+	var request acceptInviteRequest
+
+	if err := c.BodyParser(&request); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "invalid_request",
+			"message": "Payload permintaan tidak valid.",
+		})
+	}
+
+	request.AccessToken = strings.TrimSpace(request.AccessToken)
+	if request.AccessToken == "" || request.Password == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "validation_error",
+			"message": "Token aktivasi dan password wajib diisi.",
+		})
+	}
+
+	if err := h.authService.AcceptInvite(
+		c.UserContext(),
+		request.AccessToken,
+		request.Password,
+	); err != nil {
+		return handleAcceptInviteError(c, err)
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"message": "Password berhasil dibuat. Silakan masuk menggunakan Akun Balai.",
 	})
 }
 
@@ -943,6 +981,45 @@ func handleResetPasswordError(
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error":   "invalid_recovery_token",
 			"message": "Sesi reset password tidak valid atau sudah kedaluwarsa.",
+		})
+
+	case errors.Is(err, services.ErrAuthRateLimited):
+		return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+			"error":   "rate_limited",
+			"message": "Terlalu banyak permintaan. Coba kembali nanti.",
+		})
+
+	case errors.Is(err, services.ErrAuthUnavailable):
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error":   "auth_unavailable",
+			"message": "Layanan autentikasi sedang tidak tersedia.",
+		})
+
+	default:
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":   "internal_error",
+			"message": "Terjadi kesalahan pada server.",
+		})
+	}
+}
+
+func handleAcceptInviteError(
+	c *fiber.Ctx,
+	err error,
+) error {
+	switch {
+	case errors.Is(err, services.ErrInvalidToken):
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error":   "invalid_invite",
+			"message": "Tautan aktivasi tidak valid atau sudah kedaluwarsa.",
+		})
+
+	case errors.Is(err, services.ErrSamePassword),
+		errors.Is(err, services.ErrInvalidPassword):
+
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "invalid_password",
+			"message": "Password baru tidak memenuhi ketentuan.",
 		})
 
 	case errors.Is(err, services.ErrAuthRateLimited):

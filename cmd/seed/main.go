@@ -21,6 +21,7 @@ func main() {
 	adminService, err := services.NewSupabaseAdminService(
 		cfg.SupabaseURL,
 		cfg.SupabaseAdminKey,
+		cfg.SupabaseInviteRedirectURL,
 	)
 	if err != nil {
 		log.Fatalf("failed to initialize Supabase admin service: %v", err)
