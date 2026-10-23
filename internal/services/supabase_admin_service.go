@@ -51,6 +51,11 @@ type generateMagicLinkResponse struct {
 	VerificationType string `json:"verification_type"`
 }
 
+type inviteAuthUserRequest struct {
+	Email string                 `json:"email"`
+	Data  map[string]interface{} `json:"data,omitempty"`
+}
+
 func (s *SupabaseAdminService) FindUserByEmail(
 	ctx context.Context,
 	email string,
@@ -194,6 +199,45 @@ func (s *SupabaseAdminService) CreateUser(
 		ID:    authUser.ID,
 		Email: authUser.Email,
 	}, nil
+}
+
+// InviteUser lets Supabase Auth own credential setup. No temporary or
+// plaintext password is generated or persisted by Central SSO.
+func (s *SupabaseAdminService) InviteUser(
+	ctx context.Context,
+	email string,
+	fullName string,
+) (*models.SupabaseAuthUser, error) {
+	payload := inviteAuthUserRequest{
+		Email: strings.ToLower(strings.TrimSpace(email)),
+		Data:  map[string]interface{}{"full_name": strings.TrimSpace(fullName)},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal admin invite request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+"/auth/v1/invite", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create admin invite request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	s.setAdminHeaders(req)
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrAdminUnavailable, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("%w: invite user returned status %d", ErrAdminUnavailable, resp.StatusCode)
+	}
+	var authUser adminAuthUserResponse
+	if err := json.NewDecoder(resp.Body).Decode(&authUser); err != nil {
+		return nil, fmt.Errorf("decode invited auth user: %w", err)
+	}
+	if strings.TrimSpace(authUser.ID) == "" {
+		return nil, ErrAdminUnavailable
+	}
+	return &models.SupabaseAuthUser{ID: authUser.ID, Email: authUser.Email}, nil
 }
 
 func (s *SupabaseAdminService) DeleteUser(

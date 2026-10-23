@@ -38,6 +38,7 @@ func main() {
 	credentialRepository := repository.NewCredentialRepository(db)
 	centralRegistrationRepository :=
 		repository.NewCentralRegistrationRepository(db)
+	klinikAdminUserRepository := repository.NewKlinikAdminUserRepository(db)
 	browserSSORepository := repository.NewBrowserSSORepository(db)
 
 	applicationEnrollmentRepository :=
@@ -172,6 +173,12 @@ func main() {
 		klinikContextService,
 		applicationContextService,
 	)
+	klinikAdminUserService := services.NewKlinikAdminUserService(
+		applicationContextService,
+		supabaseAdminService,
+		klinikAdminUserRepository,
+	)
+	klinikAdminUserHandler := handlers.NewKlinikAdminUserHandler(klinikAdminUserService)
 
 	var browserSSOService *services.BrowserSSOService
 	var accountPortalService *services.AccountPortalService
@@ -250,6 +257,7 @@ func main() {
 		authMiddleware,
 		browserSSOHandler,
 	)
+	router.RegisterKlinikAdminUsers(app, klinikAdminUserHandler, authMiddleware)
 
 	listenAddress := cfg.AppHost + ":" + cfg.AppPort
 
