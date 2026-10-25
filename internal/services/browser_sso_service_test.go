@@ -289,6 +289,39 @@ func TestBrowserSSOPostLogoutRedirectValidation(t *testing.T) {
 	}
 }
 
+func TestBrowserSSOCancelReturnValidation(t *testing.T) {
+	service, _, _, _, _, _ := newBrowserSSOTestService(t)
+
+	got, err := service.ValidateCancelReturn("klinik-pkp-web", "http://localhost:3000/login", "/admin/users?page=2&status=active")
+	if err != nil || got != "http://localhost:3000/admin/users?page=2&status=active" {
+		t.Fatalf("valid relative cancel return failed: got=%q err=%v", got, err)
+	}
+
+	got, err = service.ValidateCancelReturn("silapet-web", "http://localhost:8081/login", "http://localhost:8081/bookings/123")
+	if err != nil || got != "http://localhost:8081/bookings/123" {
+		t.Fatalf("valid absolute cancel return failed: got=%q err=%v", got, err)
+	}
+
+	got, err = service.ValidateCancelReturn("klinik-pkp-web", "http://localhost:3000/login", "")
+	if err != nil || got != "" {
+		t.Fatalf("empty cancel return failed: got=%q err=%v", got, err)
+	}
+
+	for _, unsafe := range []string{
+		"https://evil.example/login",
+		"//evil.example/login",
+		"/\\evil.example",
+		"http://localhost:8081/bookings",
+		"javascript:alert(1)",
+		"/path\nwith\rnewlines",
+		"/path#withfragment",
+	} {
+		if _, err := service.ValidateCancelReturn("klinik-pkp-web", "http://localhost:3000/login", unsafe); err == nil {
+			t.Fatalf("unsafe cancel return accepted: %q", unsafe)
+		}
+	}
+}
+
 func TestBrowserSSOAuthorizeUsesResolvedClientApplication(t *testing.T) {
 	service, store, _, _, apps, enrollments := newBrowserSSOTestService(t)
 	store.session = &models.BrowserSSOSession{

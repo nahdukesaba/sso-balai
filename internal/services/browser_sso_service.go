@@ -172,6 +172,56 @@ func (s *BrowserSSOService) ValidatePostLogoutRedirect(clientID, redirectURI str
 	return nil
 }
 
+func (s *BrowserSSOService) ValidateCancelReturn(clientID, postLogoutRedirectURI, cancelReturn string) (string, error) {
+	cancelReturn = strings.TrimSpace(cancelReturn)
+	if cancelReturn == "" {
+		return "", nil
+	}
+	if err := s.ValidatePostLogoutRedirect(clientID, postLogoutRedirectURI); err != nil {
+		return "", err
+	}
+	parsedPostLogout, err := url.ParseRequestURI(postLogoutRedirectURI)
+	if err != nil || parsedPostLogout.Host == "" {
+		return "", ErrInvalidAuthorizeRequest
+	}
+	expectedOrigin := strings.ToLower(parsedPostLogout.Scheme + "://" + parsedPostLogout.Host)
+
+	if strings.HasPrefix(cancelReturn, "http://") || strings.HasPrefix(cancelReturn, "https://") {
+		parsedCancel, err := url.ParseRequestURI(cancelReturn)
+		if err != nil || parsedCancel.Host == "" || parsedCancel.User != nil || parsedCancel.Fragment != "" {
+			return "", ErrInvalidAuthorizeRequest
+		}
+		actualOrigin := strings.ToLower(parsedCancel.Scheme + "://" + parsedCancel.Host)
+		if actualOrigin != expectedOrigin {
+			return "", ErrInvalidAuthorizeRequest
+		}
+		return parsedCancel.String(), nil
+	}
+
+	if !strings.HasPrefix(cancelReturn, "/") || strings.HasPrefix(cancelReturn, "//") || strings.HasPrefix(cancelReturn, "/\\") || strings.Contains(cancelReturn, "\\") || strings.Contains(cancelReturn, "#") {
+		return "", ErrInvalidAuthorizeRequest
+	}
+	for i := 0; i < len(cancelReturn); i++ {
+		if cancelReturn[i] <= ' ' || cancelReturn[i] == 0x7f {
+			return "", ErrInvalidAuthorizeRequest
+		}
+	}
+	parsedRelative, err := url.Parse(cancelReturn)
+	if err != nil || parsedRelative.Host != "" || !strings.HasPrefix(parsedRelative.Path, "/") {
+		return "", ErrInvalidAuthorizeRequest
+	}
+
+	return expectedOrigin + cancelReturn, nil
+}
+
+func (s *BrowserSSOService) ApplicationCodeForClient(clientID string) (string, error) {
+	client, ok := s.clients[strings.TrimSpace(clientID)]
+	if !ok {
+		return "", ErrInvalidAuthorizeRequest
+	}
+	return client.applicationCode, nil
+}
+
 func buildBrowserSSOClientRegistry(configs []BrowserSSOClient) (map[string]registeredBrowserSSOClient, error) {
 	clients := make(map[string]registeredBrowserSSOClient, len(configs))
 	for _, config := range configs {

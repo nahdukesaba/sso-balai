@@ -47,8 +47,12 @@ func TestAccountPortalLaunchRequiresApprovedMembershipAndServerURL(t *testing.T)
 		t.Fatal(err)
 	}
 	card := view.Applications[0]
-	if !card.Launchable || card.LaunchURL != "http://silapet.test:8081/api/auth/sso/start" || card.Name != "SILAPET" {
+	if !card.Launchable || card.LaunchURL != "/portal/launch?app=silapet" || card.Name != "SILAPET" {
 		t.Fatalf("approved application did not use server metadata: %#v", card)
+	}
+	launchTarget, err := portal.Launch(context.Background(), "portal-cookie", "silapet")
+	if err != nil || launchTarget != "http://silapet.test:8081/api/auth/sso/start" {
+		t.Fatalf("unexpected launch target: target=%q err=%v", launchTarget, err)
 	}
 }
 
@@ -98,8 +102,12 @@ func TestAccountPortalKlinikMetadataAndApplicationSpecificAccess(t *testing.T) {
 	card := view.Applications[0]
 	if card.Name != "Klinik PKP" || card.Description != "Portal layanan informasi, konsultasi, dan pendampingan teknis BP3KP Sumatera II untuk sektor perumahan dan kawasan permukiman." ||
 		card.RoleLabel != "Admin" || card.StatusLabel != "Akses aktif" || !card.Launchable ||
-		card.LaunchURL != "http://klinik-pkp.test:3000/api/auth/sso/start" {
+		card.LaunchURL != "/portal/launch?app=klinik_pkp" {
 		t.Fatalf("unexpected Klinik card: %#v", card)
+	}
+	launchTarget, err := portal.Launch(context.Background(), "portal-cookie", "klinik_pkp")
+	if err != nil || launchTarget != "http://klinik-pkp.test:3000/api/auth/sso/start" {
+		t.Fatalf("unexpected Klinik launch target: target=%q err=%v", launchTarget, err)
 	}
 
 	applications.applications[0].Role = "user"

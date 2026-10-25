@@ -122,7 +122,7 @@ func TestAccountPortalShowsCurrentIdentityAndApplicationSpecificAccess(t *testin
 		"Pegawai Contoh", "person@example.com", "SILAPET", "Akses aktif", "Role: Admin",
 		"Klinik PKP", "Menunggu persetujuan", "Role: Pengguna", "Belum memiliki akses",
 		"Portal layanan informasi, konsultasi, dan pendampingan teknis BP3KP Sumatera II untuk sektor perumahan dan kawasan permukiman.",
-		`href="http://silapet.test:8081/api/auth/sso/start"`, `href="/logout?portal=1"`,
+		`href="/portal/launch?app=silapet"`, `href="/logout?portal=1"`,
 	} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("portal missing %q: %s", expected, html)
@@ -134,7 +134,8 @@ func TestAccountPortalShowsCurrentIdentityAndApplicationSpecificAccess(t *testin
 	if strings.Contains(html, "auth-user") || strings.Contains(html, "app-user") {
 		t.Fatal("internal identity IDs leaked to portal HTML")
 	}
-	if strings.Contains(html, `href="http://klinik-pkp.test:3000/api/auth/sso/start"`) {
+	if strings.Contains(html, `href="/portal/launch?app=klinik_pkp"`) ||
+		strings.Contains(html, `href="http://klinik-pkp.test:3000/api/auth/sso/start"`) {
 		t.Fatal("pending Klinik membership received a launch link")
 	}
 }
@@ -247,5 +248,133 @@ func TestAccountPortalLogoutReturnsToPortal(t *testing.T) {
 	}
 	if response.StatusCode != http.StatusSeeOther || response.Header.Get("Location") != "/" || store.revokeCalls != 1 {
 		t.Fatalf("unexpected portal logout: status=%d location=%q calls=%d", response.StatusCode, response.Header.Get("Location"), store.revokeCalls)
+	}
+}
+
+func TestAccountPortalLaunchCardFlows(t *testing.T) {
+	session := &models.BrowserSSOSession{
+		ID:         "test-session-id",
+		AuthUserID: "auth-user",
+		AppUserID:  "app-user",
+		ExpiresAt:  time.Now().Add(time.Hour),
+	}
+	handler, _, _ := newAccountPortalHandler(
+		t,
+		session,
+		nil,
+		[]models.PortalApplicationAccess{
+			{Code: "silapet", Name: "SILAPET", Role: "admin", Status: models.MembershipStatusApproved, HasMembership: true},
+			{Code: "klinik_pkp", Name: "Klinik PKP", Role: "user", Status: models.MembershipStatusPending, HasMembership: true},
+		},
+	)
+	app := fiber.New()
+	app.Get("/portal/launch", handler.PortalLaunch)
+	app.Get("/authorize", handler.Authorize)
+	app.Get("/authorize/continue", handler.ContinueAuthorize)
+	app.Get("/", handler.PortalHome)
+
+	// 1. Pending app launch directly is forbidden
+	pendingReq := httptest.NewRequest(http.MethodGet, "/portal/launch?app=klinik_pkp", nil)
+	pendingReq.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
+	pendingResp, err := app.Test(pendingReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pendingResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("pending app launch was not forbidden: status=%d", pendingResp.StatusCode)
+	}
+
+	// 2. Approved app launch sets cookie and redirects to app launch URL
+	approvedReq := httptest.NewRequest(http.MethodGet, "/portal/launch?app=silapet", nil)
+	approvedReq.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
+	approvedResp, err := app.Test(approvedReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approvedResp.StatusCode != http.StatusSeeOther ||
+		approvedResp.Header.Get("Location") != "http://silapet.test:8081/api/auth/sso/start" {
+		t.Fatalf("unexpected launch redirect: status=%d location=%q", approvedResp.StatusCode, approvedResp.Header.Get("Location"))
+	}
+	launchCookie := responseCookie(approvedResp, portalLaunchCookie)
+	if launchCookie == nil || launchCookie.Value != "silapet" {
+		t.Fatalf("missing or invalid portal launch cookie: %#v", launchCookie)
+	}
+
+	// 3. Central /authorize with portal launch cookie skips "Lanjut ke aplikasi" and directly authorizes
+	authorizeURL := "/authorize?client_id=silapet-web&redirect_uri=" + url.QueryEscape("http://localhost:8081/auth/sso/callback") +
+		"&response_type=code&state=test-state&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256"
+	directReq := httptest.NewRequest(http.MethodGet, authorizeURL, nil)
+	directReq.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
+	directReq.AddCookie(launchCookie)
+	directResp, err := app.Test(directReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected 302 Found, got %d", directResp.StatusCode)
+	}
+	directLoc := directResp.Header.Get("Location")
+	if strings.Contains(directLoc, "/?request=") {
+		t.Fatalf("portal card launch showed redundant continue screen: %q", directLoc)
+	}
+	if !strings.HasPrefix(directLoc, "http://localhost:8081/auth/sso/callback?code=") ||
+		!strings.Contains(directLoc, "state=test-state") {
+		t.Fatalf("expected direct app redirect with code, got %q", directLoc)
+	}
+
+	// 4. Mode A (app-initiated login, no launch cookie) redirects to /?request=... retaining "Lanjut ke aplikasi"
+	modeAReq := httptest.NewRequest(http.MethodGet, authorizeURL, nil)
+	modeAReq.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
+	modeAResp, err := app.Test(modeAReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modeAResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected 302 Found, got %d", modeAResp.StatusCode)
+	}
+	modeALoc := modeAResp.Header.Get("Location")
+	if !strings.HasPrefix(modeALoc, "/?request=") {
+		t.Fatalf("mode A did not redirect to portal gating: %q", modeALoc)
+	}
+}
+
+func TestBrowserSSOLogoutCancelPreservesExactAppURLAndRejectsOpenRedirect(t *testing.T) {
+	session := &models.BrowserSSOSession{
+		ID:         "test-session-id",
+		AuthUserID: "auth-user",
+		AppUserID:  "app-user",
+		ExpiresAt:  time.Now().Add(time.Hour),
+	}
+	handler, _, _ := newAccountPortalHandler(t, session, nil, nil)
+	app := fiber.New()
+	app.Get("/logout", handler.LogoutPage)
+
+	// Valid in-app cancel return target (e.g. /admin/users?page=2)
+	validReq := httptest.NewRequest(http.MethodGet, "/logout?client_id=klinik-pkp-web&post_logout_redirect_uri="+
+		url.QueryEscape("http://klinik-pkp.test:3000/login")+"&cancel_return="+url.QueryEscape("/admin/users?page=2&status=active"), nil)
+	validReq.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
+	validResp, err := app.Test(validReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(validResp.Body)
+	if !strings.Contains(string(body), `href="http://klinik-pkp.test:3000/admin/users?page=2&amp;status=active"`) {
+		t.Fatalf("Cancel link did not preserve exact in-app target: %s", string(body))
+	}
+
+	// Unsafe external open redirect attempt is rejected and falls back safely
+	unsafeReq := httptest.NewRequest(http.MethodGet, "/logout?client_id=klinik-pkp-web&post_logout_redirect_uri="+
+		url.QueryEscape("http://klinik-pkp.test:3000/login")+"&cancel_return="+url.QueryEscape("https://evil.example/phish"), nil)
+	unsafeReq.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
+	unsafeResp, err := app.Test(unsafeReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unsafeBody, _ := io.ReadAll(unsafeResp.Body)
+	if strings.Contains(string(unsafeBody), "evil.example") {
+		t.Fatalf("Cancel link leaked unsafe open redirect target: %s", string(unsafeBody))
+	}
+	if !strings.Contains(string(unsafeBody), `href="http://klinik-pkp.test:3000/login"`) {
+		t.Fatalf("unsafe cancel did not fall back to post_logout_redirect_uri: %s", string(unsafeBody))
 	}
 }

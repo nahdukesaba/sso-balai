@@ -31,6 +31,29 @@ func (h *BrowserSSOHandler) PortalHome(c *fiber.Ctx) error {
 	return renderAccountPortalLoggedIn(c, view)
 }
 
+func (h *BrowserSSOHandler) PortalLaunch(c *fiber.Ctx) error {
+	if h == nil || h.portalService == nil || h.service == nil {
+		return browserSSOError(c, fiber.StatusServiceUnavailable, "portal_unavailable", "Account portal is unavailable.")
+	}
+	browserToken := c.Cookies(browserSSOSessionCookie)
+	if strings.TrimSpace(browserToken) == "" {
+		return c.Redirect("/account/login", fiber.StatusSeeOther)
+	}
+	appCode := strings.TrimSpace(c.Query("app"))
+	if appCode == "" {
+		appCode = strings.TrimSpace(c.Params("app"))
+	}
+	if appCode == "" {
+		return browserSSOError(c, fiber.StatusBadRequest, "invalid_application", "Target application is required.")
+	}
+	launchURL, err := h.portalService.Launch(c.UserContext(), browserToken, appCode)
+	if err != nil {
+		return browserSSOError(c, fiber.StatusForbidden, "launch_denied", "Aplikasi tidak tersedia untuk akun ini.")
+	}
+	h.setCookie(c, portalLaunchCookie, strings.ToLower(appCode), 120, time.Time{})
+	return c.Redirect(launchURL, fiber.StatusSeeOther)
+}
+
 func (h *BrowserSSOHandler) PortalLoginPage(c *fiber.Ctx) error {
 	if h == nil || h.portalService == nil {
 		return browserSSOError(c, fiber.StatusServiceUnavailable, "portal_unavailable", "Account portal is unavailable.")

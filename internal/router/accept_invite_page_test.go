@@ -60,7 +60,7 @@ func TestCentralAcceptInvitePageIsPubliclyAvailable(t *testing.T) {
 		"type')",
 		"access_token",
 		"/api/v1/auth/accept-invite",
-		"http://localhost:3000/login",
+		`href="/login"`,
 	} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("accept invite page is missing %q", expected)

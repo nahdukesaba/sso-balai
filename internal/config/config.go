@@ -77,7 +77,7 @@ func Load() (*Config, error) {
 		SSOSilapetIntrospectionSecret: strings.TrimSpace(os.Getenv("SSO_SILAPET_INTROSPECTION_SECRET")),
 		SSOSilapetRedirectURIs:        splitCSV(os.Getenv("SSO_SILAPET_REDIRECT_URIS")),
 		SSOSilapetPostLogoutURIs:      splitCSV(os.Getenv("SSO_SILAPET_POST_LOGOUT_REDIRECT_URIS")),
-		PortalSilapetLaunchURL:        strings.TrimSpace(getEnv("PORTAL_SILAPET_LAUNCH_URL", "http://silapet.test:8081/api/auth/sso/start")),
+		PortalSilapetLaunchURL:        strings.TrimSpace(os.Getenv("PORTAL_SILAPET_LAUNCH_URL")),
 		SSOKlinikClientID:             strings.TrimSpace(getEnv("SSO_KLINIK_CLIENT_ID", "klinik-pkp-web")),
 		SSOKlinikApplicationCode:      strings.TrimSpace(getEnv("SSO_KLINIK_APPLICATION_CODE", "klinik_pkp")),
 		SSOKlinikAccessPolicy:         strings.ToUpper(strings.TrimSpace(getEnv("SSO_KLINIK_ACCESS_POLICY", "AUTO_USER"))),

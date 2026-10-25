@@ -121,7 +121,7 @@ func (s *AccountPortalService) View(
 			validPortalLaunchURL(metadata.LaunchURL)
 		launchURL := ""
 		if launchable {
-			launchURL = metadata.LaunchURL
+			launchURL = "/portal/launch?app=" + url.QueryEscape(access.Code)
 		}
 		view.Applications = append(view.Applications, models.PortalApplicationCard{
 			Code:        access.Code,
@@ -134,6 +134,45 @@ func (s *AccountPortalService) View(
 		})
 	}
 	return view, nil
+}
+
+func (s *AccountPortalService) Launch(
+	ctx context.Context,
+	browserToken string,
+	applicationCode string,
+) (string, error) {
+	identity, err := s.browser.ResolveBrowserIdentity(ctx, browserToken)
+	if err != nil {
+		return "", err
+	}
+	if identity == nil || identity.User == nil {
+		return "", ErrAccountUnavailable
+	}
+	appCode := strings.ToLower(strings.TrimSpace(applicationCode))
+	accesses, err := s.applications.ListForPortalUser(ctx, identity.User.ID)
+	if err != nil {
+		return "", err
+	}
+	var targetAccess *models.PortalApplicationAccess
+	for i := range accesses {
+		if strings.EqualFold(accesses[i].Code, appCode) {
+			targetAccess = &accesses[i]
+			break
+		}
+	}
+	if targetAccess == nil || !targetAccess.HasMembership || targetAccess.Status != models.MembershipStatusApproved {
+		return "", ErrAccountUnavailable
+	}
+	metadata, ok := s.metadata[appCode]
+	if !ok || !validPortalLaunchURL(metadata.LaunchURL) {
+		return "", ErrAccountUnavailable
+	}
+	return metadata.LaunchURL, nil
+}
+
+func (s *AccountPortalService) ConfiguredLaunchURL(applicationCode string) string {
+	appCode := strings.ToLower(strings.TrimSpace(applicationCode))
+	return s.metadata[appCode].LaunchURL
 }
 
 func (s *AccountPortalService) Login(

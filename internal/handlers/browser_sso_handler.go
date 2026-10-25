@@ -20,6 +20,7 @@ const (
 	browserSSOCSRFCookie    = "balai_sso_csrf"
 	browserSSOLogoutCSRF    = "balai_sso_logout_csrf"
 	accountPortalLoginCSRF  = "balai_portal_login_csrf"
+	portalLaunchCookie      = "balai_portal_launch"
 )
 
 type BrowserSSOHandler struct {
@@ -63,10 +64,31 @@ func (h *BrowserSSOHandler) Authorize(c *fiber.Ctx) error {
 	if h == nil || h.service == nil {
 		return browserSSOError(c, fiber.StatusServiceUnavailable, "sso_unavailable", "Browser SSO is not configured.")
 	}
-	_, sealed, err := h.authorizeRequest(c)
+	request, sealed, err := h.authorizeRequest(c)
 	if err != nil {
 		return browserSSOError(c, fiber.StatusBadRequest, "invalid_authorize_request", "Invalid SSO authorization request.")
 	}
+
+	launchApp := strings.ToLower(strings.TrimSpace(c.Cookies(portalLaunchCookie)))
+	browserToken := c.Cookies(browserSSOSessionCookie)
+	if launchApp != "" && strings.TrimSpace(browserToken) != "" {
+		h.clearCookie(c, portalLaunchCookie)
+		targetApp, appErr := h.service.ApplicationCodeForClient(request.ClientID)
+		if appErr == nil && strings.EqualFold(launchApp, targetApp) {
+			result, authErr := h.service.Authorize(c.UserContext(), request, browserToken)
+			if authErr == nil && !result.LoginRequired && result.Status == "" && result.Code != "" {
+				redirect, parseErr := url.Parse(result.RedirectURI)
+				if parseErr == nil {
+					query := redirect.Query()
+					query.Set("state", result.State)
+					query.Set("code", result.Code)
+					redirect.RawQuery = query.Encode()
+					return c.Redirect(redirect.String(), fiber.StatusFound)
+				}
+			}
+		}
+	}
+
 	return c.Redirect("/?request="+url.QueryEscape(sealed), fiber.StatusFound)
 }
 
@@ -170,9 +192,19 @@ func (h *BrowserSSOHandler) LogoutPage(c *fiber.Ctx) error {
 	}
 	clientID := strings.TrimSpace(c.Query("client_id"))
 	redirectURI := strings.TrimSpace(c.Query("post_logout_redirect_uri"))
+	cancelReturn := strings.TrimSpace(c.Query("cancel_return"))
+	if cancelReturn == "" {
+		cancelReturn = strings.TrimSpace(c.Query("return_to"))
+	}
 	portalReturn := c.Query("portal") == "1"
 	if err := h.service.ValidatePostLogoutRedirect(clientID, redirectURI); err != nil {
 		return browserSSOError(c, fiber.StatusBadRequest, "invalid_logout_request", "Invalid logout request.")
+	}
+	var validatedCancel string
+	if cancelReturn != "" && clientID != "" && redirectURI != "" {
+		if valid, err := h.service.ValidateCancelReturn(clientID, redirectURI, cancelReturn); err == nil && valid != "" {
+			validatedCancel = valid
+		}
 	}
 	active, err := h.service.HasActiveBrowserSession(
 		c.UserContext(),
@@ -210,7 +242,7 @@ func (h *BrowserSSOHandler) LogoutPage(c *fiber.Ctx) error {
 		return browserSSOError(c, fiber.StatusInternalServerError, "sso_unavailable", "Logout is unavailable.")
 	}
 	h.setCookie(c, browserSSOLogoutCSRF, csrf, 600, time.Time{})
-	return h.renderLogout(c, csrf, clientID, redirectURI, portalReturn)
+	return h.renderLogout(c, csrf, clientID, redirectURI, portalReturn, validatedCancel)
 }
 
 func (h *BrowserSSOHandler) LogoutSubmit(c *fiber.Ctx) error {
@@ -355,6 +387,7 @@ func (h *BrowserSSOHandler) renderLogout(
 	clientID string,
 	redirectURI string,
 	portalReturn bool,
+	validatedCancel ...string,
 ) error {
 	formAction := "'self'"
 	if redirectURI != "" {
@@ -370,6 +403,9 @@ func (h *BrowserSSOHandler) renderLogout(
 	// preserved session: Cancel keeps the SID active; Confirm revokes it.
 	// Central does not choose role routes or delete application cookies.
 	cancelURL := firstNonEmptyString(redirectURI, "/logout?cancelled=1")
+	if len(validatedCancel) > 0 && validatedCancel[0] != "" {
+		cancelURL = validatedCancel[0]
+	}
 	portal := ""
 	if portalReturn {
 		cancelURL = "/"

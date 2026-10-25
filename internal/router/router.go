@@ -20,6 +20,8 @@ func Register(
 	if len(browserSSOHandlers) > 0 && browserSSOHandlers[0] != nil {
 		browserSSOHandler := browserSSOHandlers[0]
 		app.Get("/", browserSSOHandler.PortalHome)
+		app.Get("/portal/launch", browserSSOHandler.PortalLaunch)
+		app.Get("/portal/launch/:app", browserSSOHandler.PortalLaunch)
 		app.Get("/account/login", browserSSOHandler.PortalLoginPage)
 		app.Post("/account/login", browserSSOHandler.PortalLoginSubmit)
 		app.Get("/authorize", browserSSOHandler.Authorize)
