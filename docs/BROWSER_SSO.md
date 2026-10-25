@@ -14,8 +14,9 @@ IDs, wildcard URLs, and cross-client redirects fail closed.
 
 - Client ID: `silapet-web`
 - Application code: `silapet`
-- Local redirect URI: `http://localhost:8081/auth/sso/callback`
-- Local post-logout URI: `http://localhost:8081/login`
+- Local redirect URI: `http://silapet.test:8080/auth/sso/callback`
+- Local post-logout URI: `http://silapet.test:8080/login`
+- Local portal launch URL: `http://silapet.test:8081/api/auth/sso/start`
 - Redirect URIs use an exact configuration allowlist; arbitrary callback URLs are rejected.
 - The browser client has no client secret. PKCE S256 protects the authorization code.
 
@@ -23,9 +24,9 @@ IDs, wildcard URLs, and cross-client redirects fail closed.
 
 - Client ID: `klinik-pkp-web`
 - Application code: `klinik_pkp`
-- Local redirect URI: `http://localhost:3000/auth/sso/callback`
-- Local post-logout URI: `http://localhost:3000/login`
-- Local portal launch URL: `http://localhost:3000/`
+- Local redirect URI: `http://klinik-pkp.test:3000/auth/sso/callback`
+- Local post-logout URI: `http://klinik-pkp.test:3000/login`
+- Local portal launch URL: `http://klinik-pkp.test:3000/api/auth/sso/start`
 
 These Klinik values are for local development. Production redirect,
 post-logout, and launch URLs are not finalized and must be supplied through the
@@ -56,20 +57,24 @@ Password recovery continues through the existing Supabase-owned `POST /api/v1/au
 
 The Central cookie is opaque, `HttpOnly`, `Path=/`, configurable `SameSite`, and `Secure=true` by default. `SameSite=None` is rejected unless `Secure=true`. Local HTTP development must explicitly set `SSO_BROWSER_COOKIE_SECURE=false`; production must retain `true`.
 
-SILAPET logout is coordinated only when the verified SILAPET access token says
-the current application session came from Browser SSO. A direct-login SILAPET
-session is revoked and returns directly to SILAPET `/login`, even if an
-unrelated Central browser cookie happens to exist.
+Both apps decide logout behavior from the verified server-owned login source.
+DIRECT logout immediately clears only that app session, without revoking or
+introspecting a Central SID.
 
-For Browser SSO sessions, the application first revokes its Supabase session
-and clears local state, then navigates through its backend to Central
-`GET /logout`. Central shows a CSRF-protected confirmation only when the opaque
-cookie resolves to an active browser session. Missing, expired, or revoked
-sessions receive an already-logged-out state, or return directly to an exact
-registered application URI. `POST /logout` revokes only the session identified
-by the current opaque cookie. Sessions belonging to other applications are not
-revoked. Registered cancel actions return to the exact configured application
-login URI; direct Central cancel uses the existing `/logout?cancelled=1` state.
+For SSO sessions, initiation preserves the app cookies and upstream credentials
+and navigates through the app backend to Central `GET /logout`. Central shows
+a CSRF-protected confirmation for an active opaque browser session. Cancel
+does not mutate that session. Only `POST /logout` revokes the current SID.
+All SSO apps bound to that SID reject it on their next validation or refresh;
+independent DIRECT sessions and unrelated Central SIDs remain active.
+
+Both Confirm and Cancel return to the exact registered application `/login`.
+The app revalidates its preserved session: an active SID restores the app-owned
+role route; a revoked SID is rejected and the app clears its invalid cookies.
+Central never deletes another host's cookies or selects an app role route.
+Missing, expired, or revoked Central sessions receive an already-logged-out
+state or return to the exact registered URI. Direct Central cancel uses the
+existing `/logout?cancelled=1` state; portal cancel returns to `/`.
 
 ## Configuration
 
@@ -83,11 +88,11 @@ login URI; direct Central cancel uses the existing `/logout?cancelled=1` state.
 - `SSO_SILAPET_APPLICATION_CODE`
 - `SSO_SILAPET_REDIRECT_URIS` (comma-separated exact allowlist)
 - `SSO_SILAPET_POST_LOGOUT_REDIRECT_URIS` (comma-separated exact allowlist)
-- `PORTAL_SILAPET_LAUNCH_URL` (absolute server-controlled HTTP(S) URL; use `http://127.0.0.1:5173/` for the local SILAPET frontend and configure the production URL in its environment)
+- `PORTAL_SILAPET_LAUNCH_URL` (app SSO start URL; `http://silapet.test:8081/api/auth/sso/start` locally)
 - `SSO_KLINIK_CLIENT_ID` (`klinik-pkp-web` locally)
 - `SSO_KLINIK_APPLICATION_CODE` (`klinik_pkp`)
-- `SSO_KLINIK_REDIRECT_URIS` (comma-separated exact allowlist; `http://localhost:3000/auth/sso/callback` locally)
-- `SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS` (comma-separated exact allowlist; `http://localhost:3000/login` locally)
-- `PORTAL_KLINIK_LAUNCH_URL` (absolute server-controlled HTTP(S) URL; `http://localhost:3000/` locally)
+- `SSO_KLINIK_REDIRECT_URIS` (comma-separated exact allowlist; `http://klinik-pkp.test:3000/auth/sso/callback` locally)
+- `SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS` (comma-separated exact allowlist; `http://klinik-pkp.test:3000/login` locally)
+- `PORTAL_KLINIK_LAUNCH_URL` (app SSO start URL; `http://klinik-pkp.test:3000/api/auth/sso/start` locally)
 
-The feature is fail-closed and disabled by default. The local portal is available at the Central listener (for the current local stack, `http://127.0.0.1:18082/`). Apply migration `000006_create_browser_sso` only to the intended local environment before enabling it. The account portal itself adds no migration.
+The feature is fail-closed and disabled by default. The local portal is available at `http://sso-balai.test:18082/`. The existing stack already has the Browser SSO schema. The portal launch and logout sequencing fixes add no migration. Existing `.env` overrides must be changed manually to the launch URLs above; changing `.env.example` does not change a running service. Restart the local Central process after updating those values.

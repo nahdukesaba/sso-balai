@@ -27,13 +27,13 @@ func TestLoadBrowserSSOClients(t *testing.T) {
 	t.Setenv("SSO_SILAPET_INTROSPECTION_SECRET", "silapet-test-introspection-secret-0001")
 	t.Setenv("SSO_SILAPET_REDIRECT_URIS", " http://localhost:8081/auth/sso/callback ")
 	t.Setenv("SSO_SILAPET_POST_LOGOUT_REDIRECT_URIS", " http://localhost:8081/login ")
-	t.Setenv("PORTAL_SILAPET_LAUNCH_URL", "http://127.0.0.1:5173/")
+	t.Setenv("PORTAL_SILAPET_LAUNCH_URL", "http://silapet.test:8081/api/auth/sso/start")
 	t.Setenv("SSO_KLINIK_CLIENT_ID", " klinik-pkp-web ")
 	t.Setenv("SSO_KLINIK_APPLICATION_CODE", " klinik_pkp ")
 	t.Setenv("SSO_KLINIK_INTROSPECTION_SECRET", "klinik-test-introspection-secret-00001")
 	t.Setenv("SSO_KLINIK_REDIRECT_URIS", " http://localhost:3000/auth/sso/callback ")
 	t.Setenv("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS", " http://localhost:3000/login ")
-	t.Setenv("PORTAL_KLINIK_LAUNCH_URL", "http://localhost:3000/")
+	t.Setenv("PORTAL_KLINIK_LAUNCH_URL", "http://klinik-pkp.test:3000/api/auth/sso/start")
 
 	cfg, err := Load()
 	if err != nil {
@@ -43,7 +43,8 @@ func TestLoadBrowserSSOClients(t *testing.T) {
 		cfg.SSOKlinikClientID != "klinik-pkp-web" || cfg.SSOKlinikApplicationCode != "klinik_pkp" ||
 		len(cfg.SSOSilapetRedirectURIs) != 1 || cfg.SSOSilapetRedirectURIs[0] != "http://localhost:8081/auth/sso/callback" ||
 		len(cfg.SSOKlinikRedirectURIs) != 1 || cfg.SSOKlinikRedirectURIs[0] != "http://localhost:3000/auth/sso/callback" ||
-		cfg.PortalKlinikLaunchURL != "http://localhost:3000/" {
+		cfg.PortalSilapetLaunchURL != "http://silapet.test:8081/api/auth/sso/start" ||
+		cfg.PortalKlinikLaunchURL != "http://klinik-pkp.test:3000/api/auth/sso/start" {
 		t.Fatal("browser SSO clients were not loaded correctly")
 	}
 }

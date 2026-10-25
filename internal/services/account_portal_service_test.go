@@ -27,7 +27,7 @@ func TestAccountPortalLaunchRequiresApprovedMembershipAndServerURL(t *testing.T)
 		{Code: "silapet", Name: "Browser supplied label", Role: "user", Status: models.MembershipStatusPending, HasMembership: true},
 	}}
 	portal, err := NewAccountPortalService(
-		browser, applications, "http://localhost:8081/", "http://localhost:3000/",
+		browser, applications, "http://silapet.test:8081/api/auth/sso/start", "http://klinik-pkp.test:3000/api/auth/sso/start",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestAccountPortalLaunchRequiresApprovedMembershipAndServerURL(t *testing.T)
 		t.Fatal(err)
 	}
 	card := view.Applications[0]
-	if !card.Launchable || card.LaunchURL != "http://localhost:8081/" || card.Name != "SILAPET" {
+	if !card.Launchable || card.LaunchURL != "http://silapet.test:8081/api/auth/sso/start" || card.Name != "SILAPET" {
 		t.Fatalf("approved application did not use server metadata: %#v", card)
 	}
 }
@@ -82,7 +82,7 @@ func TestAccountPortalKlinikMetadataAndApplicationSpecificAccess(t *testing.T) {
 		},
 	}}
 	portal, err := NewAccountPortalService(
-		browser, applications, "http://localhost:8081/", "http://localhost:3000/",
+		browser, applications, "http://silapet.test:8081/api/auth/sso/start", "http://klinik-pkp.test:3000/api/auth/sso/start",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +98,7 @@ func TestAccountPortalKlinikMetadataAndApplicationSpecificAccess(t *testing.T) {
 	card := view.Applications[0]
 	if card.Name != "Klinik PKP" || card.Description != "Portal layanan informasi, konsultasi, dan pendampingan teknis BP3KP Sumatera II untuk sektor perumahan dan kawasan permukiman." ||
 		card.RoleLabel != "Admin" || card.StatusLabel != "Akses aktif" || !card.Launchable ||
-		card.LaunchURL != "http://localhost:3000/" {
+		card.LaunchURL != "http://klinik-pkp.test:3000/api/auth/sso/start" {
 		t.Fatalf("unexpected Klinik card: %#v", card)
 	}
 

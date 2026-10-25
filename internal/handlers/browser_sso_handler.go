@@ -366,6 +366,9 @@ func (h *BrowserSSOHandler) renderLogout(
 	}
 	setBrowserSSOPageHeaders(c, formAction)
 	var output strings.Builder
+	// The same registered app entry handles either decision by validating its
+	// preserved session: Cancel keeps the SID active; Confirm revokes it.
+	// Central does not choose role routes or delete application cookies.
 	cancelURL := firstNonEmptyString(redirectURI, "/logout?cancelled=1")
 	portal := ""
 	if portalReturn {

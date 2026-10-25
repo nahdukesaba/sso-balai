@@ -46,8 +46,8 @@ func newAccountPortalHandler(
 	portal, err := services.NewAccountPortalService(
 		handler.service,
 		applicationStore,
-		"http://localhost:8081/",
-		"http://localhost:3000/",
+		"http://silapet.test:8081/api/auth/sso/start",
+		"http://klinik-pkp.test:3000/api/auth/sso/start",
 	)
 	if err != nil {
 		t.Fatalf("create account portal: %v", err)
@@ -122,7 +122,7 @@ func TestAccountPortalShowsCurrentIdentityAndApplicationSpecificAccess(t *testin
 		"Pegawai Contoh", "person@example.com", "SILAPET", "Akses aktif", "Role: Admin",
 		"Klinik PKP", "Menunggu persetujuan", "Role: Pengguna", "Belum memiliki akses",
 		"Portal layanan informasi, konsultasi, dan pendampingan teknis BP3KP Sumatera II untuk sektor perumahan dan kawasan permukiman.",
-		`href="http://localhost:8081/"`, `href="/logout?portal=1"`,
+		`href="http://silapet.test:8081/api/auth/sso/start"`, `href="/logout?portal=1"`,
 	} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("portal missing %q: %s", expected, html)
@@ -134,7 +134,7 @@ func TestAccountPortalShowsCurrentIdentityAndApplicationSpecificAccess(t *testin
 	if strings.Contains(html, "auth-user") || strings.Contains(html, "app-user") {
 		t.Fatal("internal identity IDs leaked to portal HTML")
 	}
-	if strings.Contains(html, `href="http://localhost:3000/"`) {
+	if strings.Contains(html, `href="http://klinik-pkp.test:3000/api/auth/sso/start"`) {
 		t.Fatal("pending Klinik membership received a launch link")
 	}
 }
