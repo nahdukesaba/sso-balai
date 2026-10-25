@@ -63,6 +63,17 @@ func (h *BrowserSSOHandler) Authorize(c *fiber.Ctx) error {
 	if h == nil || h.service == nil {
 		return browserSSOError(c, fiber.StatusServiceUnavailable, "sso_unavailable", "Browser SSO is not configured.")
 	}
+	_, sealed, err := h.authorizeRequest(c)
+	if err != nil {
+		return browserSSOError(c, fiber.StatusBadRequest, "invalid_authorize_request", "Invalid SSO authorization request.")
+	}
+	return c.Redirect("/?request="+url.QueryEscape(sealed), fiber.StatusFound)
+}
+
+func (h *BrowserSSOHandler) ContinueAuthorize(c *fiber.Ctx) error {
+	if h == nil || h.service == nil {
+		return browserSSOError(c, fiber.StatusServiceUnavailable, "sso_unavailable", "Browser SSO is not configured.")
+	}
 	request, sealed, err := h.authorizeRequest(c)
 	if err != nil {
 		return browserSSOError(c, fiber.StatusBadRequest, "invalid_authorize_request", "Invalid SSO authorization request.")
@@ -72,7 +83,7 @@ func (h *BrowserSSOHandler) Authorize(c *fiber.Ctx) error {
 		return browserSSOError(c, fiber.StatusUnauthorized, "authorization_failed", "SSO authorization could not be completed.")
 	}
 	if result.LoginRequired {
-		return c.Redirect("/login?request="+url.QueryEscape(sealed), fiber.StatusFound)
+		return c.Redirect("/?request="+url.QueryEscape(sealed), fiber.StatusFound)
 	}
 	redirect, err := url.Parse(result.RedirectURI)
 	if err != nil {
@@ -150,7 +161,7 @@ func (h *BrowserSSOHandler) LoginSubmit(c *fiber.Ctx) error {
 	}
 	h.setSessionCookie(c, rawToken, expiresAt)
 	h.clearCookie(c, browserSSOCSRFCookie)
-	return c.Redirect("/authorize?request="+url.QueryEscape(request), fiber.StatusSeeOther)
+	return c.Redirect("/authorize/continue?request="+url.QueryEscape(request), fiber.StatusSeeOther)
 }
 
 func (h *BrowserSSOHandler) LogoutPage(c *fiber.Ctx) error {
@@ -270,8 +281,43 @@ func (h *BrowserSSOHandler) Exchange(c *fiber.Ctx) error {
 		"tokenType":    result.Session.TokenType,
 		"expiresIn":    result.Session.ExpiresIn,
 		"expiresAt":    result.Session.ExpiresAt,
+		"sid":          result.SSOSessionID,
 		"user":         result.Identity.User,
 	})
+}
+
+type browserSSOIntrospectionRequest struct {
+	ClientID  string `json:"clientId"`
+	SID       string `json:"sid"`
+	AppUserID string `json:"appUserId"`
+}
+
+func (h *BrowserSSOHandler) Introspect(c *fiber.Ctx) error {
+	if h == nil || h.service == nil {
+		return browserSSOError(c, fiber.StatusServiceUnavailable, "sso_unavailable", "Browser SSO is not configured.")
+	}
+	var request browserSSOIntrospectionRequest
+	if err := c.BodyParser(&request); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"active": false})
+	}
+	authorization := strings.Fields(strings.TrimSpace(c.Get(fiber.HeaderAuthorization)))
+	if len(authorization) != 2 || !strings.EqualFold(authorization[0], "Bearer") {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"active": false})
+	}
+	active, err := h.service.Introspect(
+		c.UserContext(),
+		request.ClientID,
+		authorization[1],
+		request.SID,
+		request.AppUserID,
+	)
+	if errors.Is(err, services.ErrInvalidBrowserSession) {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"active": false})
+	}
+	if err != nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"active": false})
+	}
+	return c.JSON(fiber.Map{"active": active})
 }
 
 func (h *BrowserSSOHandler) renderLogin(
@@ -426,7 +472,7 @@ var browserSSOLoginTemplate = template.Must(template.New("browser-sso-login").Pa
 var browserSSOLogoutTemplate = template.Must(template.New("browser-sso-logout").Parse(`<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Keluar dari akun</title><style>:root{font-family:system-ui,sans-serif;color:#17212b}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f6f8}main{width:min(28rem,calc(100% - 2rem));padding:2rem;border-radius:.75rem;background:#fff;box-shadow:0 .5rem 2rem #1f29371a}h1{margin-top:0}form{margin-top:1.5rem}button,a{box-sizing:border-box;display:block;width:100%;padding:.75rem;border-radius:.4rem;text-align:center;font:inherit;text-decoration:none}button{border:0;background:#075985;color:#fff;cursor:pointer}a{margin-top:.75rem;border:1px solid #cbd5e1;color:#17212b}</style></head>
-<body><main><h1>Keluar dari akun</h1><p>Anda akan keluar dari akun pada browser ini.</p><form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><input type="hidden" name="post_logout_redirect_uri" value="{{.RedirectURI}}"><input type="hidden" name="portal" value="{{.Portal}}"><button type="submit">Keluar</button></form><a href="{{.CancelURL}}">Batal</a></main></body></html>`))
+<body><main><h1>Keluar dari Akun Balai?</h1><p>Anda akan keluar dari semua aplikasi yang menggunakan sesi Akun Balai ini.</p><form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><input type="hidden" name="post_logout_redirect_uri" value="{{.RedirectURI}}"><input type="hidden" name="portal" value="{{.Portal}}"><button type="submit">Keluar dari semua aplikasi</button></form><a href="{{.CancelURL}}">Batal</a></main></body></html>`))
 
 var browserSSOLogoutStateTemplate = template.Must(template.New("browser-sso-logout-state").Parse(`<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

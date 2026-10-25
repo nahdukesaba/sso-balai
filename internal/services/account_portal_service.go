@@ -76,12 +76,30 @@ func validPortalLaunchURL(value string) bool {
 func (s *AccountPortalService) View(
 	ctx context.Context,
 	browserToken string,
+	pendingRequest string,
 ) (*models.AccountPortalView, error) {
 	identity, err := s.browser.ResolveBrowserIdentity(ctx, browserToken)
 	if err != nil {
 		return nil, err
 	}
 	view := &models.AccountPortalView{Identity: identity}
+	if strings.TrimSpace(pendingRequest) != "" {
+		applicationCode, pendingErr := s.browser.PendingAuthorization(pendingRequest)
+		if pendingErr != nil {
+			return nil, pendingErr
+		}
+		metadata := s.metadata[applicationCode]
+		name := strings.TrimSpace(metadata.Name)
+		if name == "" {
+			name = applicationCode
+		}
+		view.PendingAuthorization = &models.PortalPendingAuthorization{
+			ApplicationName: name,
+			Request:         pendingRequest,
+			LoginURL:        "/account/login?request=" + url.QueryEscape(pendingRequest),
+			ContinueURL:     "/authorize/continue?request=" + url.QueryEscape(pendingRequest),
+		}
+	}
 	if identity == nil || identity.User == nil {
 		return view, nil
 	}

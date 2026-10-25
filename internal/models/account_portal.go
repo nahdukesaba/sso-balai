@@ -19,6 +19,14 @@ type PortalApplicationCard struct {
 }
 
 type AccountPortalView struct {
-	Identity     *Identity
-	Applications []PortalApplicationCard
+	Identity             *Identity
+	Applications         []PortalApplicationCard
+	PendingAuthorization *PortalPendingAuthorization
+}
+
+type PortalPendingAuthorization struct {
+	ApplicationName string
+	Request         string
+	LoginURL        string
+	ContinueURL     string
 }

@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -27,11 +28,14 @@ var (
 )
 
 const (
-	browserSSOStatusPending = "pending"
-	browserSSOStatusDenied  = "denied"
+	browserSSOStatusPending     = "pending"
+	browserSSOStatusDenied      = "denied"
+	ApplicationAccessAutoUser   = "AUTO_USER"
+	ApplicationAccessRestricted = "RESTRICTED"
 )
 
 var pkceValuePattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
+var browserSessionIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
 
 type BrowserSSOStore interface {
 	CreateSession(context.Context, *models.BrowserSSOSession) error
@@ -77,12 +81,16 @@ type BrowserSSOConfig struct {
 type BrowserSSOClient struct {
 	ClientID               string
 	ApplicationCode        string
+	AccessPolicy           string
+	IntrospectionSecret    string
 	RedirectURIs           []string
 	PostLogoutRedirectURIs []string
 }
 
 type registeredBrowserSSOClient struct {
 	applicationCode string
+	accessPolicy    string
+	secretHash      [32]byte
 	redirectURIs    map[string]struct{}
 	postLogoutURIs  map[string]struct{}
 }
@@ -175,6 +183,15 @@ func buildBrowserSSOClientRegistry(configs []BrowserSSOClient) (map[string]regis
 		if _, exists := clients[clientID]; exists {
 			return nil, fmt.Errorf("%w: duplicate client ID %q", ErrBrowserSSODisabled, clientID)
 		}
+		accessPolicy := normalizeApplicationAccessPolicy(config.AccessPolicy)
+		secret := strings.TrimSpace(config.IntrospectionSecret)
+		if len(secret) < 32 {
+			return nil, fmt.Errorf(
+				"%w: client %q introspection secret must be at least 32 characters",
+				ErrBrowserSSODisabled,
+				clientID,
+			)
+		}
 
 		redirectURIs, err := buildBrowserSSOURIAllowlist(config.RedirectURIs)
 		if err != nil {
@@ -186,11 +203,22 @@ func buildBrowserSSOClientRegistry(configs []BrowserSSOClient) (map[string]regis
 		}
 		clients[clientID] = registeredBrowserSSOClient{
 			applicationCode: applicationCode,
+			accessPolicy:    accessPolicy,
+			secretHash:      sha256.Sum256([]byte(secret)),
 			redirectURIs:    redirectURIs,
 			postLogoutURIs:  postLogoutURIs,
 		}
 	}
 	return clients, nil
+}
+
+func normalizeApplicationAccessPolicy(value string) string {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case ApplicationAccessAutoUser:
+		return ApplicationAccessAutoUser
+	default:
+		return ApplicationAccessRestricted
+	}
 }
 
 func buildBrowserSSOURIAllowlist(values []string) (map[string]struct{}, error) {
@@ -282,6 +310,18 @@ func (s *BrowserSSOService) OpenAuthorizeRequest(value string) (models.BrowserSS
 	return request, nil
 }
 
+func (s *BrowserSSOService) PendingAuthorization(value string) (string, error) {
+	request, err := s.OpenAuthorizeRequest(value)
+	if err != nil {
+		return "", err
+	}
+	client, ok := s.clients[request.ClientID]
+	if !ok {
+		return "", ErrInvalidAuthorizeRequest
+	}
+	return client.applicationCode, nil
+}
+
 func (s *BrowserSSOService) Login(
 	ctx context.Context,
 	email string,
@@ -341,6 +381,10 @@ func (s *BrowserSSOService) Authorize(
 
 	application, err := s.applications.GetByAppUserID(ctx, browserSession.AppUserID, client.applicationCode)
 	if errors.Is(err, ErrApplicationMembershipUnavailable) {
+		if client.accessPolicy != ApplicationAccessAutoUser {
+			result.Status = browserSSOStatusPending
+			return result, nil
+		}
 		enrollment, enrollmentErr := s.enrollments.Request(ctx, browserSession.AppUserID, client.applicationCode)
 		if enrollmentErr != nil {
 			if errors.Is(enrollmentErr, ErrApplicationEnrollmentBlocked) {
@@ -455,7 +499,35 @@ func (s *BrowserSSOService) Exchange(
 	if err != nil {
 		return nil, err
 	}
-	return &models.LoginResult{Session: supabaseSession, Identity: identity}, nil
+	return &models.LoginResult{
+		Session:      supabaseSession,
+		Identity:     identity,
+		SSOSessionID: browserSession.ID,
+	}, nil
+}
+
+func (s *BrowserSSOService) Introspect(
+	ctx context.Context,
+	clientID string,
+	secret string,
+	sessionID string,
+	appUserID string,
+) (bool, error) {
+	client, ok := s.clients[strings.TrimSpace(clientID)]
+	providedHash := sha256.Sum256([]byte(strings.TrimSpace(secret)))
+	if !ok || subtle.ConstantTimeCompare(client.secretHash[:], providedHash[:]) != 1 {
+		return false, ErrInvalidBrowserSession
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	appUserID = strings.TrimSpace(appUserID)
+	if !browserSessionIDPattern.MatchString(sessionID) || appUserID == "" {
+		return false, nil
+	}
+	session, err := s.store.GetActiveSessionByID(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return session != nil && session.AppUserID == appUserID, nil
 }
 
 func (s *BrowserSSOService) RevokeBrowserSession(ctx context.Context, rawToken string) error {

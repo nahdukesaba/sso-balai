@@ -220,12 +220,16 @@ func main() {
 					{
 						ClientID:               cfg.SSOSilapetClientID,
 						ApplicationCode:        cfg.SSOSilapetApplicationCode,
+						AccessPolicy:           cfg.SSOSilapetAccessPolicy,
+						IntrospectionSecret:    cfg.SSOSilapetIntrospectionSecret,
 						RedirectURIs:           cfg.SSOSilapetRedirectURIs,
 						PostLogoutRedirectURIs: cfg.SSOSilapetPostLogoutURIs,
 					},
 					{
 						ClientID:               cfg.SSOKlinikClientID,
 						ApplicationCode:        cfg.SSOKlinikApplicationCode,
+						AccessPolicy:           cfg.SSOKlinikAccessPolicy,
+						IntrospectionSecret:    cfg.SSOKlinikIntrospectionSecret,
 						RedirectURIs:           cfg.SSOKlinikRedirectURIs,
 						PostLogoutRedirectURIs: cfg.SSOKlinikPostLogoutURIs,
 					},

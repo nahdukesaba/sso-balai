@@ -15,6 +15,7 @@ type SupabaseSession struct {
 }
 
 type LoginResult struct {
-	Session  *SupabaseSession
-	Identity *Identity
+	Session      *SupabaseSession
+	Identity     *Identity
+	SSOSessionID string
 }

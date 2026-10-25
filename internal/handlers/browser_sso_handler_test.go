@@ -141,6 +141,7 @@ func newHandlerBrowserSSOTestSetup(
 		services.BrowserSSOConfig{
 			Clients: []services.BrowserSSOClient{
 				{
+					IntrospectionSecret:    "handler-test-introspection-secret-0001",
 					ClientID:               "silapet-web",
 					ApplicationCode:        "silapet",
 					RedirectURIs:           []string{redirectURI},
@@ -149,6 +150,7 @@ func newHandlerBrowserSSOTestSetup(
 				{
 					ClientID:               "klinik-pkp-web",
 					ApplicationCode:        "klinik_pkp",
+					IntrospectionSecret:    "klinik-test-introspection-secret-00001",
 					RedirectURIs:           []string{"http://localhost:3000/auth/sso/callback"},
 					PostLogoutRedirectURIs: []string{"http://localhost:3000/login"},
 				},
@@ -167,6 +169,19 @@ func newHandlerBrowserSSOTestSetup(
 
 func authorizeTarget() string {
 	return authorizeTargetFor("http://localhost:8081/auth/sso/callback")
+}
+
+func mustRequestParameter(t *testing.T, location string) string {
+	t.Helper()
+	parsed, err := url.Parse(location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := parsed.Query().Get("request")
+	if value == "" {
+		t.Fatalf("missing sealed request in redirect %q", location)
+	}
+	return value
 }
 
 func authorizeTargetFor(redirectURI string) string {
@@ -198,7 +213,7 @@ func TestBrowserSSOLoginPageCSPAllowsOnlyRegisteredCallbackOrigin(t *testing.T) 
 	}
 	loginResponse, err := app.Test(httptest.NewRequest(
 		http.MethodGet,
-		authorizeResponse.Header.Get("Location"),
+		"/login?request="+url.QueryEscape(mustRequestParameter(t, authorizeResponse.Header.Get("Location"))),
 		nil,
 	))
 	if err != nil {
@@ -249,12 +264,8 @@ func TestBrowserSSOLoginPostPreservesRedirectAndCookieFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loginLocation, err := url.Parse(authorizeResponse.Header.Get("Location"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	sealedRequest := loginLocation.Query().Get("request")
-	loginResponse, err := app.Test(httptest.NewRequest(http.MethodGet, loginLocation.String(), nil))
+	sealedRequest := mustRequestParameter(t, authorizeResponse.Header.Get("Location"))
+	loginResponse, err := app.Test(httptest.NewRequest(http.MethodGet, "/login?request="+url.QueryEscape(sealedRequest), nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +297,7 @@ func TestBrowserSSOLoginPostPreservesRedirectAndCookieFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusSeeOther || location.Path != "/authorize" ||
+	if response.StatusCode != http.StatusSeeOther || location.Path != "/authorize/continue" ||
 		location.Query().Get("request") != sealedRequest {
 		t.Fatalf("unexpected post-login redirect: %d %q", response.StatusCode, response.Header.Get("Location"))
 	}
@@ -305,7 +316,7 @@ func TestBrowserSSOLoginPostPreservesRedirectAndCookieFlags(t *testing.T) {
 	}
 }
 
-func TestBrowserSSOAuthorizeRedirectsToLoginWithoutSession(t *testing.T) {
+func TestBrowserSSOAuthorizeRedirectsToPortalWithoutSession(t *testing.T) {
 	handler := newHandlerBrowserSSO(t, nil)
 	app := fiber.New()
 	app.Get("/authorize", handler.Authorize)
@@ -314,7 +325,7 @@ func TestBrowserSSOAuthorizeRedirectsToLoginWithoutSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	location := response.Header.Get("Location")
-	if response.StatusCode != http.StatusFound || !strings.HasPrefix(location, "/login?request=") {
+	if response.StatusCode != http.StatusFound || !strings.HasPrefix(location, "/?request=") {
 		t.Fatalf("unexpected redirect: %d %q", response.StatusCode, location)
 	}
 }
@@ -325,7 +336,12 @@ func TestBrowserSSOAuthorizeRedirectContainsCodeButNoTokens(t *testing.T) {
 	})
 	app := fiber.New()
 	app.Get("/authorize", handler.Authorize)
-	request := httptest.NewRequest(http.MethodGet, authorizeTarget(), nil)
+	app.Get("/authorize/continue", handler.ContinueAuthorize)
+	initialResponse, err := app.Test(httptest.NewRequest(http.MethodGet, authorizeTarget(), nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/authorize/continue?request="+url.QueryEscape(mustRequestParameter(t, initialResponse.Header.Get("Location"))), nil)
 	request.Header.Set("Cookie", browserSSOSessionCookie+"=opaque-session")
 	response, err := app.Test(request)
 	if err != nil {
@@ -375,7 +391,7 @@ func TestBrowserSSOLogoutPageDoesNotMutateAndValidPostRevokesCurrentSession(t *t
 	if strings.Contains(string(pageBody), "current-browser-secret") {
 		t.Fatal("browser session secret leaked in logout confirmation page")
 	}
-	if !strings.Contains(string(pageBody), "Keluar dari akun") ||
+	if !strings.Contains(string(pageBody), "Keluar dari Akun") ||
 		!strings.Contains(string(pageBody), `href="http://localhost:8081/login"`) {
 		t.Fatal("active logout page or registered cancel destination is incorrect")
 	}
@@ -425,7 +441,7 @@ func TestBrowserSSOLogoutPageDoesNotMutateAndValidPostRevokesCurrentSession(t *t
 		t.Fatal(err)
 	}
 	if authorizeResponse.StatusCode != http.StatusFound ||
-		!strings.HasPrefix(authorizeResponse.Header.Get("Location"), "/login?request=") {
+		!strings.HasPrefix(authorizeResponse.Header.Get("Location"), "/?request=") {
 		t.Fatalf("revoked browser cookie still authorized: %d %q", authorizeResponse.StatusCode, authorizeResponse.Header.Get("Location"))
 	}
 }

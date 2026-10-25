@@ -17,7 +17,7 @@ type fakeBrowserSSOStore struct {
 }
 
 func (f *fakeBrowserSSOStore) CreateSession(_ context.Context, session *models.BrowserSSOSession) error {
-	session.ID = "browser-session-id"
+	session.ID = "11111111-1111-4111-8111-111111111111"
 	f.session = session
 	return nil
 }
@@ -134,12 +134,16 @@ func newBrowserSSOTestService(t *testing.T) (*BrowserSSOService, *fakeBrowserSSO
 				{
 					ClientID:               "silapet-web",
 					ApplicationCode:        "silapet",
+					AccessPolicy:           ApplicationAccessAutoUser,
+					IntrospectionSecret:    "silapet-test-introspection-secret-0001",
 					RedirectURIs:           []string{"http://localhost:8081/auth/sso/callback"},
 					PostLogoutRedirectURIs: []string{"http://localhost:8081/login"},
 				},
 				{
 					ClientID:               "klinik-pkp-web",
 					ApplicationCode:        "klinik_pkp",
+					AccessPolicy:           ApplicationAccessAutoUser,
+					IntrospectionSecret:    "klinik-test-introspection-secret-00001",
 					RedirectURIs:           []string{"http://localhost:3000/auth/sso/callback"},
 					PostLogoutRedirectURIs: []string{"http://localhost:3000/login"},
 				},
@@ -166,12 +170,14 @@ func TestBrowserSSOClientRegistryValidation(t *testing.T) {
 		{
 			ClientID:               " silapet-web ",
 			ApplicationCode:        " SILAPET ",
+			IntrospectionSecret:    "silapet-test-introspection-secret-0001",
 			RedirectURIs:           []string{" http://localhost:8081/auth/sso/callback "},
 			PostLogoutRedirectURIs: []string{" http://localhost:8081/login "},
 		},
 		{
 			ClientID:               "klinik-pkp-web",
 			ApplicationCode:        "klinik_pkp",
+			IntrospectionSecret:    "klinik-test-introspection-secret-00001",
 			RedirectURIs:           []string{"http://localhost:3000/auth/sso/callback"},
 			PostLogoutRedirectURIs: []string{"http://localhost:3000/login"},
 		},
@@ -371,6 +377,27 @@ func TestBrowserSSOAuthorizeMembershipOutcomes(t *testing.T) {
 	}
 }
 
+func TestBrowserSSORestrictedApplicationDoesNotAutoEnroll(t *testing.T) {
+	service, store, _, _, apps, enrollments := newBrowserSSOTestService(t)
+	client := service.clients["klinik-pkp-web"]
+	client.accessPolicy = ApplicationAccessRestricted
+	service.clients["klinik-pkp-web"] = client
+	store.session = &models.BrowserSSOSession{
+		ID: "11111111-1111-4111-8111-111111111111", TokenHash: hashOpaqueToken("cookie"),
+		AuthUserID: "auth", AppUserID: "user",
+	}
+	apps.application = nil
+	apps.err = ErrApplicationMembershipUnavailable
+
+	result, err := service.Authorize(context.Background(), validKlinikAuthorizeRequest(), "cookie")
+	if err != nil || result.Status != browserSSOStatusPending || result.Code != "" {
+		t.Fatalf("unexpected restricted result: %#v %v", result, err)
+	}
+	if len(enrollments.requestedCode) != 0 {
+		t.Fatalf("restricted application auto-enrolled user: %#v", enrollments.requestedCode)
+	}
+}
+
 func TestBrowserSSOExchangeBindingsSingleUseAndSuccess(t *testing.T) {
 	service, store, _, issuer, _, _ := newBrowserSSOTestService(t)
 	verifier := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
@@ -383,11 +410,35 @@ func TestBrowserSSOExchangeBindingsSingleUseAndSuccess(t *testing.T) {
 	issuer.session = &models.SupabaseSession{AccessToken: "access", RefreshToken: "independent-refresh", User: models.SupabaseAuthUser{ID: "auth"}}
 
 	result, err := service.Exchange(context.Background(), "one-time-code", "silapet-web", "http://localhost:8081/auth/sso/callback", verifier)
-	if err != nil || result.Session.AccessToken != "access" || issuer.email != "person@example.com" {
+	if err != nil || result.Session.AccessToken != "access" || issuer.email != "person@example.com" ||
+		result.SSOSessionID != "session" {
 		t.Fatalf("exchange failed: %v", err)
 	}
 	if _, err := service.Exchange(context.Background(), "one-time-code", "silapet-web", "http://localhost:8081/auth/sso/callback", verifier); !errors.Is(err, ErrInvalidAuthorizationCode) {
 		t.Fatalf("expected replay rejection, got %v", err)
+	}
+}
+
+func TestBrowserSSOIntrospectionAuthenticatesClientAndBindsSessionUser(t *testing.T) {
+	service, store, _, _, _, _ := newBrowserSSOTestService(t)
+	sid := "11111111-1111-4111-8111-111111111111"
+	store.session = &models.BrowserSSOSession{ID: sid, AppUserID: "app-user-id"}
+
+	active, err := service.Introspect(context.Background(), "silapet-web", "silapet-test-introspection-secret-0001", sid, "app-user-id")
+	if err != nil || !active {
+		t.Fatalf("valid session was not active: active=%v err=%v", active, err)
+	}
+	active, err = service.Introspect(context.Background(), "silapet-web", "silapet-test-introspection-secret-0001", sid, "different-user")
+	if err != nil || active {
+		t.Fatalf("session was not bound to app user: active=%v err=%v", active, err)
+	}
+	if _, err = service.Introspect(context.Background(), "silapet-web", "wrong-secret", sid, "app-user-id"); !errors.Is(err, ErrInvalidBrowserSession) {
+		t.Fatalf("invalid client secret accepted: %v", err)
+	}
+	store.session = nil
+	active, err = service.Introspect(context.Background(), "silapet-web", "silapet-test-introspection-secret-0001", sid, "app-user-id")
+	if err != nil || active {
+		t.Fatalf("revoked or expired session stayed active: active=%v err=%v", active, err)
 	}
 }
 
@@ -467,7 +518,7 @@ func TestBrowserSSOExchangeIsolatedByClientAndApplication(t *testing.T) {
 			result, err := service.Exchange(
 				context.Background(), test.code, test.clientID, test.redirectURI, verifier,
 			)
-			if err != nil || result == nil || result.Session.AccessToken != "access" {
+			if err != nil || result == nil || result.Session.AccessToken != "access" || result.SSOSessionID != "session" {
 				t.Fatalf("correct client exchange failed: %#v %v", result, err)
 			}
 			if len(apps.requestedCode) != 1 || apps.requestedCode[0] != test.applicationCode {

@@ -32,7 +32,7 @@ func TestAccountPortalLaunchRequiresApprovedMembershipAndServerURL(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := portal.View(context.Background(), "portal-cookie")
+	view, err := portal.View(context.Background(), "portal-cookie", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestAccountPortalLaunchRequiresApprovedMembershipAndServerURL(t *testing.T)
 	}
 
 	applications.applications[0].Status = models.MembershipStatusApproved
-	view, err = portal.View(context.Background(), "portal-cookie")
+	view, err = portal.View(context.Background(), "portal-cookie", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestAccountPortalKlinikMetadataAndApplicationSpecificAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	view, err := portal.View(context.Background(), "portal-cookie")
+	view, err := portal.View(context.Background(), "portal-cookie", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestAccountPortalKlinikMetadataAndApplicationSpecificAccess(t *testing.T) {
 
 	applications.applications[0].Role = "user"
 	applications.applications[0].Status = models.MembershipStatusPending
-	view, err = portal.View(context.Background(), "portal-cookie")
+	view, err = portal.View(context.Background(), "portal-cookie", "")
 	if err != nil {
 		t.Fatal(err)
 	}
