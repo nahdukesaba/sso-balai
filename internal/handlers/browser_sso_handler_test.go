@@ -391,9 +391,17 @@ func TestBrowserSSOLogoutPageDoesNotMutateAndValidPostRevokesCurrentSession(t *t
 	if strings.Contains(string(pageBody), "current-browser-secret") {
 		t.Fatal("browser session secret leaked in logout confirmation page")
 	}
-	if !strings.Contains(string(pageBody), "Keluar dari Akun") ||
-		!strings.Contains(string(pageBody), `href="http://localhost:8081/login"`) {
-		t.Fatal("active logout page or registered cancel destination is incorrect")
+	logoutHTML := string(pageBody)
+	for _, expected := range []string{
+		"<title>Konfirmasi Keluar Akun Balai Pegawai</title>",
+		"<h1>Keluar dari Akun Balai?</h1>",
+		"Anda akan keluar dari semua aplikasi yang menggunakan sesi Akun Balai Pegawai!",
+		`<button type="submit">Keluar</button>`,
+		`href="http://localhost:8081/login">Batal</a>`,
+	} {
+		if !strings.Contains(logoutHTML, expected) {
+			t.Fatalf("active logout page missing %q: %s", expected, logoutHTML)
+		}
 	}
 	csrfCookie := responseCookie(pageResponse, browserSSOLogoutCSRF)
 	if csrfCookie == nil || csrfCookie.Value == "" || !csrfCookie.HttpOnly ||

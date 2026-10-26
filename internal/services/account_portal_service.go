@@ -49,12 +49,12 @@ func NewAccountPortalService(
 		metadata: map[string]accountPortalApplicationMetadata{
 			models.ApplicationCodeSilapet: {
 				Name:        "SILAPET",
-				Description: "Layanan peminjaman fasilitas dan kendaraan Balai.",
+				Description: "Portal layanan peminjaman fasilitas sarana, prasarana, serta kendaraan operasional resmi BP3KP Sumatera II",
 				LaunchURL:   silapetLaunchURL,
 			},
 			models.ApplicationCodeKlinikPKP: {
 				Name:        "Klinik PKP",
-				Description: "Portal layanan informasi, konsultasi, dan pendampingan teknis BP3KP Sumatera II untuk sektor perumahan dan kawasan permukiman.",
+				Description: "Portal layanan informasi, konsultasi, dan pendampingan teknis perumahan serta permukiman BP3KP Sumatera II",
 				LaunchURL:   klinikLaunchURL,
 			},
 		},
@@ -185,19 +185,19 @@ func (s *AccountPortalService) Login(
 
 func portalStatusLabel(status string, hasMembership bool) string {
 	if !hasMembership {
-		return "Belum memiliki akses"
+		return "Belum Memiliki Akses"
 	}
 	switch status {
 	case models.MembershipStatusApproved:
-		return "Akses aktif"
+		return "Akses Aktif"
 	case models.MembershipStatusPending:
-		return "Menunggu persetujuan"
+		return "Menunggu Persetujuan"
 	case models.MembershipStatusRejected:
-		return "Akses ditolak"
+		return "Akses Ditolak"
 	case models.MembershipStatusDisabled:
-		return "Akses dinonaktifkan"
+		return "Akses Dinonaktifkan"
 	default:
-		return "Status akses tidak tersedia"
+		return "Akses Tidak Tersedia"
 	}
 }
 

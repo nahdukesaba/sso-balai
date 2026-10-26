@@ -7,7 +7,7 @@ const forgotPasswordPageHTML = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Lupa password - Akun Balai</title>
+  <title>Lupa password - Akun Balai Pegawai</title>
   <style>
     :root { color-scheme: light; font-family: system-ui, sans-serif; color: #17212b; background: #eef3f7; }
     * { box-sizing: border-box; }
@@ -26,16 +26,15 @@ const forgotPasswordPageHTML = `<!doctype html>
 </head>
 <body>
   <main>
-    <p>BP3KP Sumatera II · Akun Balai</p>
-    <h1>Lupa password</h1>
-    <p>Masukkan email Akun Balai. Jika email terdaftar, instruksi reset password akan dikirim.</p>
+    <p>BP3KP Sumatera II · Akun Balai Pegawai</p>
+    <h1>Lupa Password</h1>
     <form id="forgot-form">
       <label for="email">Email</label>
       <input id="email" name="email" type="email" autocomplete="email" required>
-      <button id="submit" type="submit">Kirim instruksi</button>
+      <button id="submit" type="submit">Kirim</button>
     </form>
     <p id="message" role="status" aria-live="polite"></p>
-    <a href="/">Kembali ke Akun Balai</a>
+    <a href="/account/login">Login</a>
   </main>
   <script>
     (() => {
@@ -45,7 +44,7 @@ const forgotPasswordPageHTML = `<!doctype html>
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
         submit.disabled = true;
-        message.textContent = 'Mengirim instruksi...';
+        message.textContent = 'Mengirim...';
         try {
           const response = await fetch('/api/v1/auth/forgot-password', {
             method: 'POST',
@@ -54,13 +53,13 @@ const forgotPasswordPageHTML = `<!doctype html>
           });
           const result = await response.json().catch(() => ({}));
           if (!response.ok) {
-            throw new Error(result.message || 'Permintaan tidak dapat diproses.');
+            throw new Error(result.message || 'Permintaan Tidak Dapat Diproses !');
           }
           form.reset();
           form.hidden = true;
-          message.textContent = result.message || 'Jika email terdaftar, instruksi reset password akan dikirim.';
+          message.textContent = result.message || 'Jika email terdaftar, instruksi reset password akan dikirim';
         } catch (error) {
-          message.textContent = error.message || 'Permintaan tidak dapat diproses.';
+          message.textContent = error.message || 'Permintaan Tidak Dapat Diproses !';
           submit.disabled = false;
         }
       });

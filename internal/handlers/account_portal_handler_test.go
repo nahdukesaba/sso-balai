@@ -86,8 +86,20 @@ func TestAccountPortalLoggedOutForMissingRevokedOrExpiredSession(t *testing.T) {
 				t.Fatal(err)
 			}
 			html := string(body)
-			if response.StatusCode != http.StatusOK || !strings.Contains(html, "Akun Balai") ||
-				!strings.Contains(html, `href="/account/login"`) || strings.Contains(html, "Pegawai Contoh") {
+			for _, expected := range []string{
+				"<title>Akun Balai Pegawai - BP3KP Sumatera II</title>",
+				`<div class="brand-unit">Akun Balai Pegawai</div>`,
+				"Portal Layanan Internal Balai PK3P Sumatera II",
+				"<h1>Akun Balai Pegawai</h1>",
+				`href="/account/login"`,
+				`href="/forgot-password">Lupa Password</a>`,
+			} {
+				if !strings.Contains(html, expected) {
+					t.Fatalf("logged-out portal missing %q: %s", expected, html)
+				}
+			}
+			if response.StatusCode != http.StatusOK || strings.Contains(html, "Pegawai Contoh") ||
+				strings.Contains(html, "Gunakan akun Balai untuk mengakses aplikasi internal yang tersedia.") {
 				t.Fatalf("unexpected logged-out portal: status=%d body=%q", response.StatusCode, html)
 			}
 		})
@@ -119,9 +131,11 @@ func TestAccountPortalShowsCurrentIdentityAndApplicationSpecificAccess(t *testin
 	}
 	html := string(body)
 	for _, expected := range []string{
-		"Pegawai Contoh", "person@example.com", "SILAPET", "Akses aktif", "Role: Admin",
-		"Klinik PKP", "Menunggu persetujuan", "Role: Pengguna", "Belum memiliki akses",
-		"Portal layanan informasi, konsultasi, dan pendampingan teknis BP3KP Sumatera II untuk sektor perumahan dan kawasan permukiman.",
+		"Akun Balai Pegawai", "Pegawai Contoh", "SILAPET", "Akses Aktif", `<p class="role">Admin</p>`,
+		"Klinik PKP", "Menunggu Persetujuan", `<p class="role">Pengguna</p>`, "Belum Memiliki Akses",
+		"Portal layanan peminjaman fasilitas sarana, prasarana, serta kendaraan operasional resmi BP3KP Sumatera II",
+		"Portal layanan informasi, konsultasi, dan pendampingan teknis perumahan serta permukiman BP3KP Sumatera II",
+		">Buka Aplikasi</a>",
 		`href="/portal/launch?app=silapet"`, `href="/logout?portal=1"`,
 	} {
 		if !strings.Contains(html, expected) {
@@ -131,8 +145,9 @@ func TestAccountPortalShowsCurrentIdentityAndApplicationSpecificAccess(t *testin
 	if applicationStore.requestedUserID != "app-user" {
 		t.Fatalf("applications queried for wrong user: %q", applicationStore.requestedUserID)
 	}
-	if strings.Contains(html, "auth-user") || strings.Contains(html, "app-user") {
-		t.Fatal("internal identity IDs leaked to portal HTML")
+	if strings.Contains(html, "auth-user") || strings.Contains(html, "app-user") ||
+		strings.Contains(html, "person@example.com") || strings.Contains(html, "Role:") {
+		t.Fatal("removed or internal identity details leaked to portal HTML")
 	}
 	if strings.Contains(html, `href="/portal/launch?app=klinik_pkp"`) ||
 		strings.Contains(html, `href="http://klinik-pkp.test:3000/api/auth/sso/start"`) {
@@ -152,6 +167,23 @@ func TestAccountPortalLoginCreatesBrowserSession(t *testing.T) {
 	pageResponse, err := app.Test(httptest.NewRequest(http.MethodGet, "/account/login", nil))
 	if err != nil {
 		t.Fatal(err)
+	}
+	pageBody, err := io.ReadAll(pageResponse.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginHTML := string(pageBody)
+	for _, expected := range []string{
+		"<title>Masuk - Akun Balai Pegawai</title>",
+		"Gunakan Email & Password Akun Balai Anda",
+		`href="/forgot-password">Lupa Password?</a>`,
+	} {
+		if !strings.Contains(loginHTML, expected) {
+			t.Fatalf("portal login missing %q: %s", expected, loginHTML)
+		}
+	}
+	if strings.Contains(loginHTML, "Kembali ke Akun Balai") {
+		t.Fatal("portal login still contains removed return copy")
 	}
 	csrfCookie := responseCookie(pageResponse, accountPortalLoginCSRF)
 	if csrfCookie == nil || csrfCookie.Value == "" {
@@ -232,9 +264,18 @@ func TestAccountPortalLogoutReturnsToPortal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(pageBody), `name="portal" value="1"`) ||
-		!strings.Contains(string(pageBody), `href="/"`) {
-		t.Fatalf("portal logout context was not preserved: %s", string(pageBody))
+	logoutHTML := string(pageBody)
+	for _, expected := range []string{
+		"<title>Konfirmasi Keluar Akun Balai Pegawai</title>",
+		"<h1>Keluar dari Akun Balai?</h1>",
+		"Anda akan keluar dari semua aplikasi yang menggunakan sesi Akun Balai Pegawai!",
+		`<button type="submit">Keluar</button>`,
+		`name="portal" value="1"`,
+		`href="/">Batal</a>`,
+	} {
+		if !strings.Contains(logoutHTML, expected) {
+			t.Fatalf("portal logout missing %q: %s", expected, logoutHTML)
+		}
 	}
 	csrfCookie := responseCookie(pageResponse, browserSSOLogoutCSRF)
 	form := url.Values{"csrf": {csrfCookie.Value}, "portal": {"1"}}
@@ -335,6 +376,37 @@ func TestAccountPortalLaunchCardFlows(t *testing.T) {
 	modeALoc := modeAResp.Header.Get("Location")
 	if !strings.HasPrefix(modeALoc, "/?request=") {
 		t.Fatalf("mode A did not redirect to portal gating: %q", modeALoc)
+	}
+
+	loggedInPortalRequest := httptest.NewRequest(http.MethodGet, modeALoc, nil)
+	loggedInPortalRequest.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
+	loggedInPortalResponse, err := app.Test(loggedInPortalRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loggedInPortalBody, err := io.ReadAll(loggedInPortalResponse.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loggedInPortalHTML := string(loggedInPortalBody)
+	if !strings.Contains(loggedInPortalHTML, ">Lanjut ke SILAPET</a>") ||
+		strings.Contains(loggedInPortalHTML, "Permintaan masuk sudah divalidasi") ||
+		strings.Contains(loggedInPortalHTML, "<h2>Lanjut ke") {
+		t.Fatalf("logged-in pending authorization copy is incorrect: %s", loggedInPortalHTML)
+	}
+
+	loggedOutPortalResponse, err := app.Test(httptest.NewRequest(http.MethodGet, modeALoc, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loggedOutPortalBody, err := io.ReadAll(loggedOutPortalResponse.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loggedOutPortalHTML := string(loggedOutPortalBody)
+	if !strings.Contains(loggedOutPortalHTML, `<p class="status">SILAPET</p>`) ||
+		strings.Contains(loggedOutPortalHTML, "Target aplikasi:") {
+		t.Fatalf("logged-out pending authorization copy is incorrect: %s", loggedOutPortalHTML)
 	}
 }
 

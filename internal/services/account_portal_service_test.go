@@ -37,7 +37,8 @@ func TestAccountPortalLaunchRequiresApprovedMembershipAndServerURL(t *testing.T)
 		t.Fatal(err)
 	}
 	if len(view.Applications) != 1 || view.Applications[0].Launchable ||
-		view.Applications[0].LaunchURL != "" || view.Applications[0].StatusLabel != "Menunggu persetujuan" {
+		view.Applications[0].LaunchURL != "" || view.Applications[0].StatusLabel != "Menunggu Persetujuan" ||
+		view.Applications[0].Description != "Portal layanan peminjaman fasilitas sarana, prasarana, serta kendaraan operasional resmi BP3KP Sumatera II" {
 		t.Fatalf("pending membership became launchable: %#v", view.Applications)
 	}
 
@@ -100,8 +101,8 @@ func TestAccountPortalKlinikMetadataAndApplicationSpecificAccess(t *testing.T) {
 		t.Fatalf("unexpected applications: %#v", view.Applications)
 	}
 	card := view.Applications[0]
-	if card.Name != "Klinik PKP" || card.Description != "Portal layanan informasi, konsultasi, dan pendampingan teknis BP3KP Sumatera II untuk sektor perumahan dan kawasan permukiman." ||
-		card.RoleLabel != "Admin" || card.StatusLabel != "Akses aktif" || !card.Launchable ||
+	if card.Name != "Klinik PKP" || card.Description != "Portal layanan informasi, konsultasi, dan pendampingan teknis perumahan serta permukiman BP3KP Sumatera II" ||
+		card.RoleLabel != "Admin" || card.StatusLabel != "Akses Aktif" || !card.Launchable ||
 		card.LaunchURL != "/portal/launch?app=klinik_pkp" {
 		t.Fatalf("unexpected Klinik card: %#v", card)
 	}
@@ -117,8 +118,32 @@ func TestAccountPortalKlinikMetadataAndApplicationSpecificAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	card = view.Applications[0]
-	if card.RoleLabel != "Pengguna" || card.StatusLabel != "Menunggu persetujuan" ||
+	if card.RoleLabel != "Pengguna" || card.StatusLabel != "Menunggu Persetujuan" ||
 		card.Launchable || card.LaunchURL != "" {
 		t.Fatalf("pending Klinik card became launchable: %#v", card)
+	}
+}
+
+func TestPortalStatusLabelsMatchPortalCopy(t *testing.T) {
+	tests := []struct {
+		name          string
+		status        string
+		hasMembership bool
+		want          string
+	}{
+		{name: "no membership", status: models.MembershipStatusApproved, want: "Belum Memiliki Akses"},
+		{name: "approved", status: models.MembershipStatusApproved, hasMembership: true, want: "Akses Aktif"},
+		{name: "pending", status: models.MembershipStatusPending, hasMembership: true, want: "Menunggu Persetujuan"},
+		{name: "rejected", status: models.MembershipStatusRejected, hasMembership: true, want: "Akses Ditolak"},
+		{name: "disabled", status: models.MembershipStatusDisabled, hasMembership: true, want: "Akses Dinonaktifkan"},
+		{name: "unknown", status: "unknown", hasMembership: true, want: "Akses Tidak Tersedia"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := portalStatusLabel(test.status, test.hasMembership); got != test.want {
+				t.Fatalf("unexpected portal status label: got %q want %q", got, test.want)
+			}
+		})
 	}
 }

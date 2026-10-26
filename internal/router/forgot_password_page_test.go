@@ -31,10 +31,27 @@ func TestCentralForgotPasswordPageUsesExistingRecoveryAPI(t *testing.T) {
 	}
 	html := string(body)
 	if response.StatusCode != http.StatusOK ||
-		!strings.HasPrefix(response.Header.Get("Content-Type"), "text/html") ||
-		!strings.Contains(html, "/api/v1/auth/forgot-password") ||
-		!strings.Contains(html, "Jika email terdaftar") {
+		!strings.HasPrefix(response.Header.Get("Content-Type"), "text/html") {
 		t.Fatalf("forgot-password page is not wired to Central recovery: status=%d", response.StatusCode)
+	}
+	for _, expected := range []string{
+		"<title>Lupa password - Akun Balai Pegawai</title>",
+		"BP3KP Sumatera II · Akun Balai Pegawai",
+		"<h1>Lupa Password</h1>",
+		`<label for="email">Email</label>`,
+		`<button id="submit" type="submit">Kirim</button>`,
+		`href="/account/login">Login</a>`,
+		"Mengirim...",
+		"Permintaan Tidak Dapat Diproses !",
+		"Jika email terdaftar, instruksi reset password akan dikirim",
+		"/api/v1/auth/forgot-password",
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("forgot-password page missing %q", expected)
+		}
+	}
+	if strings.Contains(html, "Masukkan email Akun Balai") || strings.Contains(html, "Kembali ke Akun Balai") {
+		t.Fatal("forgot-password page still contains removed copy")
 	}
 	if strings.Contains(html, "RESEND") || strings.Contains(html, "localStorage") {
 		t.Fatal("forgot-password page contains a legacy or persistent recovery path")
