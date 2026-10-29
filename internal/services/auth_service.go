@@ -16,30 +16,41 @@ var (
 	ErrAccountUnavailable           = errors.New("account is unavailable")
 	ErrAccountAlreadyExists         = errors.New("central account already exists")
 	ErrRegistrationIdentityConflict = errors.New("central identity conflict")
+	ErrInvalidRegistrationRequest   = errors.New("invalid central registration request")
 	ErrInvalidRecoveryRequest       = errors.New("invalid password recovery request")
 	ErrInvalidCurrentPassword       = errors.New("invalid current password")
 	ErrUnsupportedApplication       = errors.New("unsupported application")
 )
 
+func membershipLoginStatusError(status string) error {
+	switch status {
+	case models.MembershipStatusApproved:
+		return nil
+	case models.MembershipStatusPending:
+		return ErrAccountPending
+	case models.MembershipStatusRejected:
+		return ErrAccountRejected
+	case models.MembershipStatusDisabled:
+		return ErrAccountDisabled
+	default:
+		return ErrAccountUnavailable
+	}
+}
+
 type AuthService struct {
-	supabaseAuthService            *SupabaseAuthService
-	adminService                   *SupabaseAdminService
-	identityService                *IdentityService
-	userRepository                 *repository.UserRepository
-	klinikContextService           *KlinikContextService
-	applicationContextService      *ApplicationContextService
-	klinikMigrationService         *KlinikMigrationService
-	centralLoginService            *CentralLoginService
-	centralRegistrationService     *CentralRegistrationService
-	centralSessionService          *SessionService
-	centralPasswordChangeService   *CentralPasswordChangeService
-	centralPasswordRecoveryService *CentralPasswordRecoveryService
-	applicationEnrollmentService   *ApplicationEnrollmentService
-	requestAccessService           RequestAccessEnrollment
-	activeAuthenticationService    ActiveAuthenticationService
-	passwordRecoveryService        PasswordRecoveryService
-	registrationService            RegistrationService
-	inviteAcceptanceService        InviteAcceptanceService
+	supabaseAuthService          *SupabaseAuthService
+	adminService                 *SupabaseAdminService
+	identityService              *IdentityService
+	userRepository               *repository.UserRepository
+	klinikContextService         *KlinikContextService
+	applicationContextService    *ApplicationContextService
+	klinikMigrationService       *KlinikMigrationService
+	applicationEnrollmentService *ApplicationEnrollmentService
+	requestAccessService         RequestAccessEnrollment
+	activeAuthenticationService  ActiveAuthenticationService
+	passwordRecoveryService      PasswordRecoveryService
+	registrationService          RegistrationService
+	inviteAcceptanceService      InviteAcceptanceService
 }
 
 type RequestAccessEnrollment interface {
@@ -69,36 +80,6 @@ func NewAuthService(
 		applicationContextService: applicationContextService,
 		klinikMigrationService:    klinikMigrationService,
 	}
-}
-
-func (s *AuthService) SetCentralLoginService(
-	service *CentralLoginService,
-) {
-	s.centralLoginService = service
-}
-
-func (s *AuthService) SetCentralRegistrationService(
-	service *CentralRegistrationService,
-) {
-	s.centralRegistrationService = service
-}
-
-func (s *AuthService) SetCentralSessionService(
-	service *SessionService,
-) {
-	s.centralSessionService = service
-}
-
-func (s *AuthService) SetCentralPasswordChangeService(
-	service *CentralPasswordChangeService,
-) {
-	s.centralPasswordChangeService = service
-}
-
-func (s *AuthService) SetCentralPasswordRecoveryService(
-	service *CentralPasswordRecoveryService,
-) {
-	s.centralPasswordRecoveryService = service
 }
 
 func (s *AuthService) SetApplicationEnrollmentService(
@@ -191,97 +172,6 @@ func (s *AuthService) RequestPasswordRecovery(
 		ctx,
 		email,
 	)
-}
-
-func (s *AuthService) isSilapetPasswordRecoveryEligible(
-	ctx context.Context,
-	email string,
-) (bool, error) {
-	if s.userRepository == nil ||
-		s.applicationContextService == nil {
-
-		return false, ErrAuthUnavailable
-	}
-
-	user, err := s.userRepository.GetByEmailIncludingDeleted(
-		ctx,
-		email,
-	)
-	if err != nil {
-		return false, err
-	}
-
-	if user == nil || user.DeletedAt != nil {
-		return false, nil
-	}
-
-	appContext, err := s.applicationContextService.GetByAppUserID(
-		ctx,
-		user.ID,
-		models.ApplicationCodeSilapet,
-	)
-	if err != nil {
-		if errors.Is(err, ErrApplicationUnavailable) ||
-			errors.Is(err, ErrApplicationMembershipUnavailable) {
-
-			return false, nil
-		}
-
-		return false, err
-	}
-
-	return appContext.Status == models.MembershipStatusApproved, nil
-}
-
-func (s *AuthService) isKlinikPasswordRecoveryEligible(
-	ctx context.Context,
-	email string,
-) (bool, error) {
-	if s.userRepository == nil ||
-		s.klinikContextService == nil ||
-		s.applicationContextService == nil {
-
-		return false, ErrAuthUnavailable
-	}
-
-	user, err := s.userRepository.GetByEmailIncludingDeleted(ctx, email)
-	if err != nil {
-		return false, err
-	}
-
-	if user == nil || user.DeletedAt != nil {
-		return false, nil
-	}
-
-	appContext, err := s.applicationContextService.GetByAppUserID(
-		ctx,
-		user.ID,
-		models.ApplicationCodeKlinikPKP,
-	)
-	if err != nil {
-		if errors.Is(err, ErrApplicationUnavailable) ||
-			errors.Is(err, ErrApplicationMembershipUnavailable) {
-
-			return false, nil
-		}
-
-		return false, err
-	}
-
-	if appContext.Status != models.MembershipStatusApproved {
-		return false, nil
-	}
-
-	_, err = s.klinikContextService.GetByAppUserID(ctx, user.ID)
-	if err != nil {
-		if errors.Is(err, ErrKlinikAccountUnavailable) {
-			return false, nil
-		}
-
-		return false, err
-	}
-
-	return true, nil
 }
 
 // ChangePassword verifies and updates the authenticated user's Supabase

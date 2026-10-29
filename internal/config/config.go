@@ -15,7 +15,6 @@ type Config struct {
 	AppHost                       string
 	AppPort                       string
 	DatabaseURL                   string
-	AuthAccessTokenSecret         string
 	PasswordRecoveryRedirectURL   string
 	SupabaseInviteRedirectURL     string
 	SSOBrowserEnabled             bool
@@ -53,10 +52,9 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		AppHost:               getEnv("APP_HOST", "127.0.0.1"),
-		AppPort:               getEnv("APP_PORT", "8080"),
-		DatabaseURL:           os.Getenv("DATABASE_URL"),
-		AuthAccessTokenSecret: os.Getenv("AUTH_ACCESS_TOKEN_SECRET"),
+		AppHost:     getEnv("APP_HOST", "127.0.0.1"),
+		AppPort:     getEnv("APP_PORT", "8080"),
+		DatabaseURL: os.Getenv("DATABASE_URL"),
 		PasswordRecoveryRedirectURL: getEnv(
 			"PASSWORD_RECOVERY_REDIRECT_URL",
 			"https://sso.bp3kpsumatera2.com/reset-password",
