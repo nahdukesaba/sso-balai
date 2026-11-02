@@ -131,6 +131,9 @@ func main() {
 			centralRegistrationRepository,
 		)
 
+	// TODO(auth-cleanup): This legacy migration graph is still constructed even
+	// though the active login path does not invoke it. Confirm production
+	// migration and rollback requirements before removing it.
 	klinikCredentialService := services.NewKlinikCredentialService(
 		klinikUserRepository,
 	)
