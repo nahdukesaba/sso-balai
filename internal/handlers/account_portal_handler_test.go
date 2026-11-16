@@ -208,17 +208,32 @@ func TestAccountPortalLoginCreatesBrowserSession(t *testing.T) {
 	}
 
 	// App-initiated login resumes authorization instead of stopping at the portal.
-	form.Set("request", "sealed-app-request")
-	appRequest := httptest.NewRequest(http.MethodPost, "/account/login", strings.NewReader(form.Encode()))
-	appRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	appRequest.AddCookie(csrfCookie)
-	appResponse, err := app.Test(appRequest)
+	sealed, err := handler.service.SealAuthorizeRequest(models.BrowserSSOAuthorizeRequest{
+		ClientID: "silapet-web", RedirectURI: "http://localhost:8081/auth/sso/callback",
+		ResponseType: "code", State: "app-state", CodeChallengeMethod: "S256",
+		CodeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	postLogin := func(request string) *http.Response {
+		form.Set("request", request)
+		appRequest := httptest.NewRequest(http.MethodPost, "/account/login", strings.NewReader(form.Encode()))
+		appRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		appRequest.AddCookie(csrfCookie)
+		appResponse, err := app.Test(appRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return appResponse
+	}
+	appResponse := postLogin(sealed)
 	if appResponse.StatusCode != http.StatusSeeOther ||
-		appResponse.Header.Get("Location") != "/authorize/continue?request=sealed-app-request" {
+		appResponse.Header.Get("Location") != "/authorize/continue?request="+url.QueryEscape(sealed) {
 		t.Fatalf("app login did not resume authorization: %d %q", appResponse.StatusCode, appResponse.Header.Get("Location"))
+	}
+	if forged := postLogin("forged-request"); forged.StatusCode != http.StatusBadRequest {
+		t.Fatalf("forged pending request was accepted: %d", forged.StatusCode)
 	}
 }
 

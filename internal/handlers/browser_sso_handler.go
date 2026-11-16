@@ -17,7 +17,6 @@ import (
 
 const (
 	browserSSOSessionCookie = "balai_sso_session"
-	browserSSOCSRFCookie    = "balai_sso_csrf"
 	browserSSOLogoutCSRF    = "balai_sso_logout_csrf"
 	accountPortalLoginCSRF  = "balai_portal_login_csrf"
 )
@@ -111,54 +110,6 @@ func (h *BrowserSSOHandler) authorizeRequest(c *fiber.Ctx) (models.BrowserSSOAut
 	}
 	sealed, err := h.service.SealAuthorizeRequest(request)
 	return request, sealed, err
-}
-
-func (h *BrowserSSOHandler) LoginPage(c *fiber.Ctx) error {
-	if h == nil || h.service == nil {
-		return browserSSOError(c, fiber.StatusServiceUnavailable, "sso_unavailable", "Browser SSO is not configured.")
-	}
-	request := strings.TrimSpace(c.Query("request"))
-	authorizeRequest, err := h.service.OpenAuthorizeRequest(request)
-	if err != nil {
-		return browserSSOError(c, fiber.StatusBadRequest, "invalid_authorize_request", "Invalid SSO authorization request.")
-	}
-	if _, err := browserSSORedirectOrigin(authorizeRequest.RedirectURI); err != nil {
-		return browserSSOError(c, fiber.StatusBadRequest, "invalid_authorize_request", "Invalid SSO authorization request.")
-	}
-	csrf, err := services.RandomBrowserSSOToken(32)
-	if err != nil {
-		return browserSSOError(c, fiber.StatusInternalServerError, "sso_unavailable", "Browser SSO is unavailable.")
-	}
-	h.setCSRFCookie(c, csrf)
-	return h.renderLogin(c, request, authorizeRequest.RedirectURI, csrf, "")
-}
-
-func (h *BrowserSSOHandler) LoginSubmit(c *fiber.Ctx) error {
-	if h == nil || h.service == nil {
-		return browserSSOError(c, fiber.StatusServiceUnavailable, "sso_unavailable", "Browser SSO is not configured.")
-	}
-	request := strings.TrimSpace(c.FormValue("request"))
-	csrf := strings.TrimSpace(c.FormValue("csrf"))
-	cookieCSRF := strings.TrimSpace(c.Cookies(browserSSOCSRFCookie))
-	if csrf == "" || cookieCSRF == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(cookieCSRF)) != 1 {
-		return browserSSOError(c, fiber.StatusForbidden, "invalid_csrf", "The login form expired. Start SSO again.")
-	}
-	authorizeRequest, err := h.service.OpenAuthorizeRequest(request)
-	if err != nil {
-		return browserSSOError(c, fiber.StatusBadRequest, "invalid_authorize_request", "Invalid SSO authorization request.")
-	}
-	if _, err := browserSSORedirectOrigin(authorizeRequest.RedirectURI); err != nil {
-		return browserSSOError(c, fiber.StatusBadRequest, "invalid_authorize_request", "Invalid SSO authorization request.")
-	}
-	rawToken, expiresAt, err := h.service.Login(
-		c.UserContext(), c.FormValue("email"), c.FormValue("password"),
-	)
-	if err != nil {
-		return h.renderLogin(c, request, authorizeRequest.RedirectURI, csrf, "Email atau password tidak valid.")
-	}
-	h.setSessionCookie(c, rawToken, expiresAt)
-	h.clearCookie(c, browserSSOCSRFCookie)
-	return c.Redirect("/authorize/continue?request="+url.QueryEscape(request), fiber.StatusSeeOther)
 }
 
 func (h *BrowserSSOHandler) LogoutPage(c *fiber.Ctx) error {
@@ -327,35 +278,6 @@ func (h *BrowserSSOHandler) Introspect(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"active": active})
 }
 
-func (h *BrowserSSOHandler) renderLogin(
-	c *fiber.Ctx,
-	request string,
-	redirectURI string,
-	csrf string,
-	message string,
-) error {
-	redirectOrigin, err := browserSSORedirectOrigin(redirectURI)
-	if err != nil {
-		return browserSSOError(c, fiber.StatusBadRequest, "invalid_authorize_request", "Invalid SSO authorization request.")
-	}
-	c.Set(fiber.HeaderCacheControl, "no-store")
-	c.Set("Referrer-Policy", "no-referrer")
-	c.Set("Content-Security-Policy", fmt.Sprintf(
-		"default-src 'none'; style-src 'unsafe-inline'; form-action 'self' %s; base-uri 'none'; frame-ancestors 'none'",
-		redirectOrigin,
-	))
-	c.Type("html", "utf-8")
-	var output strings.Builder
-	if err := browserSSOLoginTemplate.Execute(&output, struct {
-		Request string
-		CSRF    string
-		Message string
-	}{request, csrf, message}); err != nil {
-		return err
-	}
-	return c.SendString(output.String())
-}
-
 func (h *BrowserSSOHandler) renderLogout(
 	c *fiber.Ctx,
 	csrf string,
@@ -460,10 +382,6 @@ func (h *BrowserSSOHandler) setSessionCookie(c *fiber.Ctx, value string, expires
 		MaxAge: int(time.Until(expires).Seconds())})
 }
 
-func (h *BrowserSSOHandler) setCSRFCookie(c *fiber.Ctx, value string) {
-	h.setCookie(c, browserSSOCSRFCookie, value, 600, time.Time{})
-}
-
 func (h *BrowserSSOHandler) setCookie(c *fiber.Ctx, name, value string, maxAge int, expires time.Time) {
 	c.Cookie(&fiber.Cookie{Name: name, Value: value, Path: "/", HTTPOnly: true,
 		Secure: h.cookieSecure, SameSite: h.cookieSameSite, MaxAge: maxAge, Expires: expires})
@@ -477,11 +395,6 @@ func (h *BrowserSSOHandler) clearCookie(c *fiber.Ctx, name string) {
 func browserSSOError(c *fiber.Ctx, status int, code, message string) error {
 	return c.Status(status).JSON(fiber.Map{"error": code, "message": message})
 }
-
-var browserSSOLoginTemplate = template.Must(template.New("browser-sso-login").Parse(`<!doctype html>
-<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Masuk SSO Balai</title><style>:root{font-family:system-ui,sans-serif;color:#17212b}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f6f8}main{width:min(28rem,calc(100% - 2rem));padding:2rem;border-radius:.75rem;background:#fff;box-shadow:0 .5rem 2rem #1f29371a}h1{margin-top:0}label{display:block;margin-top:1rem;font-weight:600}input,button{box-sizing:border-box;width:100%;margin-top:.4rem;padding:.75rem;font:inherit}button{margin-top:1.25rem;border:0;border-radius:.4rem;background:#075985;color:#fff;cursor:pointer}.error{color:#b91c1c}</style></head>
-<body><main><h1>Masuk dengan SSO Balai</h1><p>Gunakan akun Balai Anda untuk melanjutkan.</p>{{if .Message}}<p class="error" role="alert">{{.Message}}</p>{{end}}<form method="post" action="/login"><input type="hidden" name="request" value="{{.Request}}"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" required><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required><button type="submit">Masuk</button></form></main></body></html>`))
 
 var browserSSOLogoutTemplate = template.Must(template.New("browser-sso-logout").Parse(`<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

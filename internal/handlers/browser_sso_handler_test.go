@@ -184,6 +184,21 @@ func mustRequestParameter(t *testing.T, location string) string {
 	return value
 }
 
+func withAccountPortal(t *testing.T, handler *BrowserSSOHandler) *BrowserSSOHandler {
+	t.Helper()
+	portal, err := services.NewAccountPortalService(
+		handler.service,
+		&handlerPortalApplications{},
+		"http://silapet.test:8081/api/auth/sso/start",
+		"http://klinik-pkp.test:3000/api/auth/sso/start",
+	)
+	if err != nil {
+		t.Fatalf("create account portal: %v", err)
+	}
+	handler.SetAccountPortalService(portal)
+	return handler
+}
+
 func authorizeTargetFor(redirectURI string) string {
 	query := url.Values{
 		"client_id":             {"silapet-web"},
@@ -198,10 +213,10 @@ func authorizeTargetFor(redirectURI string) string {
 
 func TestBrowserSSOLoginPageCSPAllowsOnlyRegisteredCallbackOrigin(t *testing.T) {
 	redirectURI := "http://localhost:8081/auth/sso/callback?source=central"
-	handler := newHandlerBrowserSSOWithOptions(t, nil, redirectURI, nil)
+	handler := withAccountPortal(t, newHandlerBrowserSSOWithOptions(t, nil, redirectURI, nil))
 	app := fiber.New()
 	app.Get("/authorize", handler.Authorize)
-	app.Get("/login", handler.LoginPage)
+	app.Get("/account/login", handler.PortalLoginPage)
 
 	authorizeResponse, err := app.Test(httptest.NewRequest(
 		http.MethodGet,
@@ -213,7 +228,7 @@ func TestBrowserSSOLoginPageCSPAllowsOnlyRegisteredCallbackOrigin(t *testing.T) 
 	}
 	loginResponse, err := app.Test(httptest.NewRequest(
 		http.MethodGet,
-		"/login?request="+url.QueryEscape(mustRequestParameter(t, authorizeResponse.Header.Get("Location"))),
+		"/account/login?request="+url.QueryEscape(mustRequestParameter(t, authorizeResponse.Header.Get("Location"))),
 		nil,
 	))
 	if err != nil {
@@ -255,23 +270,24 @@ func TestBrowserSSOLoginPostPreservesRedirectAndCookieFlags(t *testing.T) {
 			User:        models.SupabaseAuthUser{ID: "auth-user"},
 		},
 	)
+	handler = withAccountPortal(t, handler)
 	app := fiber.New()
 	app.Get("/authorize", handler.Authorize)
-	app.Get("/login", handler.LoginPage)
-	app.Post("/login", handler.LoginSubmit)
+	app.Get("/account/login", handler.PortalLoginPage)
+	app.Post("/account/login", handler.PortalLoginSubmit)
 
 	authorizeResponse, err := app.Test(httptest.NewRequest(http.MethodGet, authorizeTarget(), nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	sealedRequest := mustRequestParameter(t, authorizeResponse.Header.Get("Location"))
-	loginResponse, err := app.Test(httptest.NewRequest(http.MethodGet, "/login?request="+url.QueryEscape(sealedRequest), nil))
+	loginResponse, err := app.Test(httptest.NewRequest(http.MethodGet, "/account/login?request="+url.QueryEscape(sealedRequest), nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var csrfCookie *http.Cookie
 	for _, cookie := range loginResponse.Cookies() {
-		if cookie.Name == browserSSOCSRFCookie {
+		if cookie.Name == accountPortalLoginCSRF {
 			csrfCookie = cookie
 			break
 		}
@@ -286,7 +302,7 @@ func TestBrowserSSOLoginPostPreservesRedirectAndCookieFlags(t *testing.T) {
 		"email":    {"person@example.com"},
 		"password": {"password"},
 	}
-	request := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	request := httptest.NewRequest(http.MethodPost, "/account/login", strings.NewReader(form.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.AddCookie(csrfCookie)
 	response, err := app.Test(request)

@@ -33,7 +33,7 @@ const acceptInvitePageHTML = `<!doctype html>
       <button id="submit" type="submit">Aktifkan Akun</button>
     </form>
     <p id="message" role="status" aria-live="polite"></p>
-    <a id="login-link" href="/login" hidden>Masuk dengan Akun Balai</a>
+    <a id="login-link" href="/account/login" hidden>Masuk dengan Akun Balai</a>
   </main>
   <script>
     (() => {

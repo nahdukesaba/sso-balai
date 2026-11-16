@@ -26,8 +26,6 @@ func Register(
 		app.Post("/account/login", browserSSOHandler.PortalLoginSubmit)
 		app.Get("/authorize", browserSSOHandler.Authorize)
 		app.Get("/authorize/continue", browserSSOHandler.ContinueAuthorize)
-		app.Get("/login", browserSSOHandler.LoginPage)
-		app.Post("/login", browserSSOHandler.LoginSubmit)
 		app.Get("/logout", browserSSOHandler.LogoutPage)
 		app.Post("/logout", browserSSOHandler.LogoutSubmit)
 		app.Post("/api/v1/auth/sso/exchange", browserSSOHandler.Exchange)
