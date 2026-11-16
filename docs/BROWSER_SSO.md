@@ -36,7 +36,7 @@ production environment; they are not inferred from requests.
 
 1. A registered application backend creates a random state and a PKCE challenge, stores only the state hash, and redirects the browser to `GET /authorize`.
 2. Central validates the client, exact redirect URI, response type, state, and S256 challenge.
-3. If the opaque `HttpOnly` Central session cookie is absent, Central displays `GET /login`. The login POST uses a double-submit CSRF token and authenticates through Supabase password login.
+3. If the opaque `HttpOnly` Central session cookie is valid, Central immediately redirects back to the app with a code (or a membership status), with no extra click. Otherwise it redirects straight to the `GET /account/login?request=...` form. The login POST uses a double-submit CSRF token, authenticates through Supabase password login, then resumes at `/authorize/continue`.
 4. Central stores only the browser-session token hash and identity IDs. It does not store a Supabase access or refresh token in the browser-session row, and revokes the transient password-login session on a best-effort basis.
 5. Approved membership receives a random, short-lived code. Missing membership is auto-enrolled as `user/pending`; pending receives `status=pending`; rejected or disabled receives `status=denied`.
 6. The application backend verifies and atomically consumes state, derives its server-held PKCE verifier, and exchanges the code server-to-server.
@@ -47,7 +47,7 @@ Only `code`, `state`, or a safe membership status is placed in the callback URL.
 
 ## Central account portal
 
-When Browser SSO is enabled, Central also serves the public `GET /` **Akun Balai** portal. A logged-out visitor can use the CSRF-protected `GET/POST /account/login` form or open `GET /forgot-password`. Portal login reuses the Supabase-backed browser-session login and creates the same opaque `balai_sso_session`; it does not require membership in an application and does not alter the sealed-request contract of the existing `GET/POST /login` Browser SSO routes.
+When Browser SSO is enabled, Central also serves the public `GET /` **Akun Balai** portal. A logged-out visitor can use the CSRF-protected `GET/POST /account/login` form or open `GET /forgot-password`. Portal login reuses the Supabase-backed browser-session login and creates the same opaque `balai_sso_session`; it does not require membership in an application. It is also the login form for app-initiated SSO: with a sealed `request`, a successful login continues at `/authorize/continue` instead of the portal. Portal **Buka Aplikasi** enters the app's SSO start URL; the app's `/authorize` call then succeeds silently because the Central session is already active.
 
 For an active Central session, the portal resolves `auth_user_id` back to the current internal identity and lists active applications from `applications`, joined to that user's `app_memberships`. Friendly membership and role labels are rendered server-side. Approved SILAPET and Klinik PKP memberships receive their own trusted launch links; pending, rejected, disabled, or missing memberships do not. Launch destinations come from `PORTAL_SILAPET_LAUNCH_URL` and `PORTAL_KLINIK_LAUNCH_URL`, never from browser input. Other applications remain visible with their database name and membership status but are not launchable until their server-controlled metadata and Browser SSO integration are configured.
 

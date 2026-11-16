@@ -206,6 +206,20 @@ func TestAccountPortalLoginCreatesBrowserSession(t *testing.T) {
 	if sessionCookie == nil || sessionCookie.Value == "" || !sessionCookie.HttpOnly || sessionCookie.Path != "/" {
 		t.Fatalf("unexpected portal session cookie: %#v", sessionCookie)
 	}
+
+	// App-initiated login resumes authorization instead of stopping at the portal.
+	form.Set("request", "sealed-app-request")
+	appRequest := httptest.NewRequest(http.MethodPost, "/account/login", strings.NewReader(form.Encode()))
+	appRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	appRequest.AddCookie(csrfCookie)
+	appResponse, err := app.Test(appRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if appResponse.StatusCode != http.StatusSeeOther ||
+		appResponse.Header.Get("Location") != "/authorize/continue?request=sealed-app-request" {
+		t.Fatalf("app login did not resume authorization: %d %q", appResponse.StatusCode, appResponse.Header.Get("Location"))
+	}
 }
 
 func TestAccountPortalLoginRejectsInvalidCredentialsAndCSRF(t *testing.T) {
@@ -325,7 +339,7 @@ func TestAccountPortalLaunchCardFlows(t *testing.T) {
 		t.Fatalf("pending app launch was not forbidden: status=%d", pendingResp.StatusCode)
 	}
 
-	// 2. Approved app launch sets cookie and redirects to app launch URL
+	// 2. Approved app launch redirects to app launch URL
 	approvedReq := httptest.NewRequest(http.MethodGet, "/portal/launch?app=silapet", nil)
 	approvedReq.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
 	approvedResp, err := app.Test(approvedReq)
@@ -336,17 +350,12 @@ func TestAccountPortalLaunchCardFlows(t *testing.T) {
 		approvedResp.Header.Get("Location") != "http://silapet.test:8081/api/auth/sso/start" {
 		t.Fatalf("unexpected launch redirect: status=%d location=%q", approvedResp.StatusCode, approvedResp.Header.Get("Location"))
 	}
-	launchCookie := responseCookie(approvedResp, portalLaunchCookie)
-	if launchCookie == nil || launchCookie.Value != "silapet" {
-		t.Fatalf("missing or invalid portal launch cookie: %#v", launchCookie)
-	}
 
-	// 3. Central /authorize with portal launch cookie skips "Lanjut ke aplikasi" and directly authorizes
+	// 3. Any /authorize with an active Central session returns straight to the app (portal or app-initiated)
 	authorizeURL := "/authorize?client_id=silapet-web&redirect_uri=" + url.QueryEscape("http://localhost:8081/auth/sso/callback") +
 		"&response_type=code&state=test-state&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256"
 	directReq := httptest.NewRequest(http.MethodGet, authorizeURL, nil)
 	directReq.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
-	directReq.AddCookie(launchCookie)
 	directResp, err := app.Test(directReq)
 	if err != nil {
 		t.Fatal(err)
@@ -363,20 +372,18 @@ func TestAccountPortalLaunchCardFlows(t *testing.T) {
 		t.Fatalf("expected direct app redirect with code, got %q", directLoc)
 	}
 
-	// 4. Mode A (app-initiated login, no launch cookie) redirects to /?request=... retaining "Lanjut ke aplikasi"
-	modeAReq := httptest.NewRequest(http.MethodGet, authorizeURL, nil)
-	modeAReq.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
-	modeAResp, err := app.Test(modeAReq)
+	// 4. Without a session /authorize goes straight to the login form
+	loggedOutResp, err := app.Test(httptest.NewRequest(http.MethodGet, authorizeURL, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if modeAResp.StatusCode != http.StatusFound {
-		t.Fatalf("expected 302 Found, got %d", modeAResp.StatusCode)
+	loggedOutLoc := loggedOutResp.Header.Get("Location")
+	if loggedOutResp.StatusCode != http.StatusFound || !strings.HasPrefix(loggedOutLoc, "/account/login?request=") {
+		t.Fatalf("logged-out authorize did not open login form: %d %q", loggedOutResp.StatusCode, loggedOutLoc)
 	}
-	modeALoc := modeAResp.Header.Get("Location")
-	if !strings.HasPrefix(modeALoc, "/?request=") {
-		t.Fatalf("mode A did not redirect to portal gating: %q", modeALoc)
-	}
+
+	// 5. Previously issued /?request= portal links still render the pending app
+	modeALoc := "/?request=" + url.QueryEscape(mustRequestParameter(t, loggedOutLoc))
 
 	loggedInPortalRequest := httptest.NewRequest(http.MethodGet, modeALoc, nil)
 	loggedInPortalRequest.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})

@@ -316,7 +316,7 @@ func TestBrowserSSOLoginPostPreservesRedirectAndCookieFlags(t *testing.T) {
 	}
 }
 
-func TestBrowserSSOAuthorizeRedirectsToPortalWithoutSession(t *testing.T) {
+func TestBrowserSSOAuthorizeRedirectsToLoginFormWithoutSession(t *testing.T) {
 	handler := newHandlerBrowserSSO(t, nil)
 	app := fiber.New()
 	app.Get("/authorize", handler.Authorize)
@@ -325,7 +325,7 @@ func TestBrowserSSOAuthorizeRedirectsToPortalWithoutSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	location := response.Header.Get("Location")
-	if response.StatusCode != http.StatusFound || !strings.HasPrefix(location, "/?request=") {
+	if response.StatusCode != http.StatusFound || !strings.HasPrefix(location, "/account/login?request=") {
 		t.Fatalf("unexpected redirect: %d %q", response.StatusCode, location)
 	}
 }
@@ -449,7 +449,7 @@ func TestBrowserSSOLogoutPageDoesNotMutateAndValidPostRevokesCurrentSession(t *t
 		t.Fatal(err)
 	}
 	if authorizeResponse.StatusCode != http.StatusFound ||
-		!strings.HasPrefix(authorizeResponse.Header.Get("Location"), "/?request=") {
+		!strings.HasPrefix(authorizeResponse.Header.Get("Location"), "/account/login?request=") {
 		t.Fatalf("revoked browser cookie still authorized: %d %q", authorizeResponse.StatusCode, authorizeResponse.Header.Get("Location"))
 	}
 }

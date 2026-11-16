@@ -50,7 +50,6 @@ func (h *BrowserSSOHandler) PortalLaunch(c *fiber.Ctx) error {
 	if err != nil {
 		return browserSSOError(c, fiber.StatusForbidden, "launch_denied", "Aplikasi tidak tersedia untuk akun ini.")
 	}
-	h.setCookie(c, portalLaunchCookie, strings.ToLower(appCode), 120, time.Time{})
 	return c.Redirect(launchURL, fiber.StatusSeeOther)
 }
 
@@ -66,7 +65,7 @@ func (h *BrowserSSOHandler) PortalLoginPage(c *fiber.Ctx) error {
 		return browserSSOError(c, fiber.StatusServiceUnavailable, "portal_unavailable", "Account portal is unavailable.")
 	}
 	if view.Identity != nil && view.Identity.User != nil {
-		return c.Redirect(portalURL(pendingRequest), fiber.StatusSeeOther)
+		return c.Redirect(afterLoginURL(pendingRequest), fiber.StatusSeeOther)
 	}
 	csrf, err := services.RandomBrowserSSOToken(32)
 	if err != nil {
@@ -96,14 +95,16 @@ func (h *BrowserSSOHandler) PortalLoginSubmit(c *fiber.Ctx) error {
 	}
 	h.setSessionCookie(c, rawToken, expiresAt)
 	h.clearCookie(c, accountPortalLoginCSRF)
-	return c.Redirect(portalURL(pendingRequest), fiber.StatusSeeOther)
+	return c.Redirect(afterLoginURL(pendingRequest), fiber.StatusSeeOther)
 }
 
-func portalURL(pendingRequest string) string {
+// afterLoginURL sends an app-initiated login straight back into authorization
+// instead of stopping at the portal.
+func afterLoginURL(pendingRequest string) string {
 	if strings.TrimSpace(pendingRequest) == "" {
 		return "/"
 	}
-	return "/?request=" + url.QueryEscape(pendingRequest)
+	return "/authorize/continue?request=" + url.QueryEscape(pendingRequest)
 }
 
 func renderAccountPortalLoggedOut(c *fiber.Ctx, view *models.AccountPortalView) error {

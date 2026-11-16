@@ -20,7 +20,6 @@ const (
 	browserSSOCSRFCookie    = "balai_sso_csrf"
 	browserSSOLogoutCSRF    = "balai_sso_logout_csrf"
 	accountPortalLoginCSRF  = "balai_portal_login_csrf"
-	portalLaunchCookie      = "balai_portal_launch"
 )
 
 type BrowserSSOHandler struct {
@@ -68,44 +67,14 @@ func (h *BrowserSSOHandler) Authorize(c *fiber.Ctx) error {
 	if err != nil {
 		return browserSSOError(c, fiber.StatusBadRequest, "invalid_authorize_request", "Invalid SSO authorization request.")
 	}
-
-	launchApp := strings.ToLower(strings.TrimSpace(c.Cookies(portalLaunchCookie)))
-	browserToken := c.Cookies(browserSSOSessionCookie)
-	if launchApp != "" && strings.TrimSpace(browserToken) != "" {
-		h.clearCookie(c, portalLaunchCookie)
-		targetApp, appErr := h.service.ApplicationCodeForClient(request.ClientID)
-		if appErr == nil && strings.EqualFold(launchApp, targetApp) {
-			result, authErr := h.service.Authorize(c.UserContext(), request, browserToken)
-			if authErr == nil && !result.LoginRequired && result.Status == "" && result.Code != "" {
-				redirect, parseErr := url.Parse(result.RedirectURI)
-				if parseErr == nil {
-					query := redirect.Query()
-					query.Set("state", result.State)
-					query.Set("code", result.Code)
-					redirect.RawQuery = query.Encode()
-					return c.Redirect(redirect.String(), fiber.StatusFound)
-				}
-			}
-		}
-	}
-
-	return c.Redirect("/?request="+url.QueryEscape(sealed), fiber.StatusFound)
-}
-
-func (h *BrowserSSOHandler) ContinueAuthorize(c *fiber.Ctx) error {
-	if h == nil || h.service == nil {
-		return browserSSOError(c, fiber.StatusServiceUnavailable, "sso_unavailable", "Browser SSO is not configured.")
-	}
-	request, sealed, err := h.authorizeRequest(c)
-	if err != nil {
-		return browserSSOError(c, fiber.StatusBadRequest, "invalid_authorize_request", "Invalid SSO authorization request.")
-	}
+	// Like "Login with Google": an active Central session returns straight to the
+	// app with a code; otherwise the user goes directly to the login form.
 	result, err := h.service.Authorize(c.UserContext(), request, c.Cookies(browserSSOSessionCookie))
 	if err != nil {
 		return browserSSOError(c, fiber.StatusUnauthorized, "authorization_failed", "SSO authorization could not be completed.")
 	}
 	if result.LoginRequired {
-		return c.Redirect("/?request="+url.QueryEscape(sealed), fiber.StatusFound)
+		return c.Redirect("/account/login?request="+url.QueryEscape(sealed), fiber.StatusFound)
 	}
 	redirect, err := url.Parse(result.RedirectURI)
 	if err != nil {
@@ -120,6 +89,12 @@ func (h *BrowserSSOHandler) ContinueAuthorize(c *fiber.Ctx) error {
 	}
 	redirect.RawQuery = query.Encode()
 	return c.Redirect(redirect.String(), fiber.StatusFound)
+}
+
+// ContinueAuthorize resumes a sealed request after login; kept as its own route
+// for links already issued.
+func (h *BrowserSSOHandler) ContinueAuthorize(c *fiber.Ctx) error {
+	return h.Authorize(c)
 }
 
 func (h *BrowserSSOHandler) authorizeRequest(c *fiber.Ctx) (models.BrowserSSOAuthorizeRequest, string, error) {

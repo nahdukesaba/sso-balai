@@ -214,14 +214,6 @@ func (s *BrowserSSOService) ValidateCancelReturn(clientID, postLogoutRedirectURI
 	return expectedOrigin + cancelReturn, nil
 }
 
-func (s *BrowserSSOService) ApplicationCodeForClient(clientID string) (string, error) {
-	client, ok := s.clients[strings.TrimSpace(clientID)]
-	if !ok {
-		return "", ErrInvalidAuthorizeRequest
-	}
-	return client.applicationCode, nil
-}
-
 func buildBrowserSSOClientRegistry(configs []BrowserSSOClient) (map[string]registeredBrowserSSOClient, error) {
 	clients := make(map[string]registeredBrowserSSOClient, len(configs))
 	for _, config := range configs {
@@ -419,6 +411,10 @@ func (s *BrowserSSOService) Authorize(
 	client := s.clients[request.ClientID]
 	result := &models.BrowserSSOAuthorizeResult{
 		State: request.State, RedirectURI: request.RedirectURI,
+	}
+	if strings.TrimSpace(browserToken) == "" {
+		result.LoginRequired = true
+		return result, nil
 	}
 	browserSession, err := s.store.GetActiveSessionByTokenHash(ctx, hashOpaqueToken(browserToken))
 	if err != nil {
