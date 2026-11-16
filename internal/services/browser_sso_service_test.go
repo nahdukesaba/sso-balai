@@ -132,20 +132,26 @@ func newBrowserSSOTestService(t *testing.T) (*BrowserSSOService, *fakeBrowserSSO
 		BrowserSSOConfig{
 			Clients: []BrowserSSOClient{
 				{
-					ClientID:               "silapet-web",
-					ApplicationCode:        "silapet",
-					AccessPolicy:           ApplicationAccessAutoUser,
-					IntrospectionSecret:    "silapet-test-introspection-secret-0001",
-					RedirectURIs:           []string{"http://localhost:8081/auth/sso/callback"},
-					PostLogoutRedirectURIs: []string{"http://localhost:8081/login"},
+					ClientID:                "silapet-web",
+					ApplicationCode:         "silapet",
+					ApplicationName:         "SILAPET",
+					Description:             "Portal layanan peminjaman fasilitas sarana, prasarana, serta kendaraan operasional resmi BP3KP Sumatera II",
+					LaunchURL:               "http://silapet.test:8081/api/auth/sso/start",
+					AccessPolicy:            ApplicationAccessAutoUser,
+					IntrospectionSecretHash: HashIntrospectionSecret("silapet-test-introspection-secret-0001"),
+					RedirectURIs:            []string{"http://localhost:8081/auth/sso/callback"},
+					PostLogoutRedirectURIs:  []string{"http://localhost:8081/login"},
 				},
 				{
-					ClientID:               "klinik-pkp-web",
-					ApplicationCode:        "klinik_pkp",
-					AccessPolicy:           ApplicationAccessAutoUser,
-					IntrospectionSecret:    "klinik-test-introspection-secret-00001",
-					RedirectURIs:           []string{"http://localhost:3000/auth/sso/callback"},
-					PostLogoutRedirectURIs: []string{"http://localhost:3000/login"},
+					ClientID:                "klinik-pkp-web",
+					ApplicationCode:         "klinik_pkp",
+					ApplicationName:         "Klinik PKP",
+					Description:             "Portal layanan informasi, konsultasi, dan pendampingan teknis perumahan serta permukiman BP3KP Sumatera II",
+					LaunchURL:               "http://klinik-pkp.test:3000/api/auth/sso/start",
+					AccessPolicy:            ApplicationAccessAutoUser,
+					IntrospectionSecretHash: HashIntrospectionSecret("klinik-test-introspection-secret-00001"),
+					RedirectURIs:            []string{"http://localhost:3000/auth/sso/callback"},
+					PostLogoutRedirectURIs:  []string{"http://localhost:3000/login"},
 				},
 			},
 			SessionTTL: time.Hour, CodeTTL: 3 * time.Minute,
@@ -168,18 +174,18 @@ func validKlinikAuthorizeRequest() models.BrowserSSOAuthorizeRequest {
 func TestBrowserSSOClientRegistryValidation(t *testing.T) {
 	clients := []BrowserSSOClient{
 		{
-			ClientID:               " silapet-web ",
-			ApplicationCode:        " SILAPET ",
-			IntrospectionSecret:    "silapet-test-introspection-secret-0001",
-			RedirectURIs:           []string{" http://localhost:8081/auth/sso/callback "},
-			PostLogoutRedirectURIs: []string{" http://localhost:8081/login "},
+			ClientID:                " silapet-web ",
+			ApplicationCode:         " SILAPET ",
+			IntrospectionSecretHash: HashIntrospectionSecret("silapet-test-introspection-secret-0001"),
+			RedirectURIs:            []string{" http://localhost:8081/auth/sso/callback "},
+			PostLogoutRedirectURIs:  []string{" http://localhost:8081/login "},
 		},
 		{
-			ClientID:               "klinik-pkp-web",
-			ApplicationCode:        "klinik_pkp",
-			IntrospectionSecret:    "klinik-test-introspection-secret-00001",
-			RedirectURIs:           []string{"http://localhost:3000/auth/sso/callback"},
-			PostLogoutRedirectURIs: []string{"http://localhost:3000/login"},
+			ClientID:                "klinik-pkp-web",
+			ApplicationCode:         "klinik_pkp",
+			IntrospectionSecretHash: HashIntrospectionSecret("klinik-test-introspection-secret-00001"),
+			RedirectURIs:            []string{"http://localhost:3000/auth/sso/callback"},
+			PostLogoutRedirectURIs:  []string{"http://localhost:3000/login"},
 		},
 	}
 	registry, err := buildBrowserSSOClientRegistry(clients)
@@ -211,6 +217,14 @@ func TestBrowserSSOClientRegistryValidation(t *testing.T) {
 		}}},
 		{name: "empty post logout", clients: []BrowserSSOClient{{
 			ClientID: "client", ApplicationCode: "app", RedirectURIs: []string{"http://localhost/callback"},
+		}}},
+		{name: "duplicate application", clients: append(clients, BrowserSSOClient{
+			ClientID: "silapet-mobile", ApplicationCode: "silapet", IntrospectionSecretHash: clients[0].IntrospectionSecretHash,
+			RedirectURIs: []string{"http://localhost/callback"}, PostLogoutRedirectURIs: []string{"http://localhost/login"},
+		})},
+		{name: "short secret hash", clients: []BrowserSSOClient{{
+			ClientID: "client", ApplicationCode: "app", IntrospectionSecretHash: []byte("short"),
+			RedirectURIs: []string{"http://localhost/callback"}, PostLogoutRedirectURIs: []string{"http://localhost/login"},
 		}}},
 	}
 	for _, test := range tests {

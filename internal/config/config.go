@@ -12,31 +12,17 @@ import (
 )
 
 type Config struct {
-	AppHost                       string
-	AppPort                       string
-	DatabaseURL                   string
-	PasswordRecoveryRedirectURL   string
-	SupabaseInviteRedirectURL     string
-	SSOBrowserEnabled             bool
-	SSOBrowserSessionKey          string
-	SSOBrowserCookieSecure        bool
-	SSOBrowserCookieSameSite      string
-	SSOBrowserSessionTTL          time.Duration
-	SSOAuthorizationCodeTTL       time.Duration
-	SSOSilapetClientID            string
-	SSOSilapetApplicationCode     string
-	SSOSilapetAccessPolicy        string
-	SSOSilapetIntrospectionSecret string
-	SSOSilapetRedirectURIs        []string
-	SSOSilapetPostLogoutURIs      []string
-	PortalSilapetLaunchURL        string
-	SSOKlinikClientID             string
-	SSOKlinikApplicationCode      string
-	SSOKlinikAccessPolicy         string
-	SSOKlinikIntrospectionSecret  string
-	SSOKlinikRedirectURIs         []string
-	SSOKlinikPostLogoutURIs       []string
-	PortalKlinikLaunchURL         string
+	AppHost                     string
+	AppPort                     string
+	DatabaseURL                 string
+	PasswordRecoveryRedirectURL string
+	SupabaseInviteRedirectURL   string
+	SSOBrowserEnabled           bool
+	SSOBrowserSessionKey        string
+	SSOBrowserCookieSecure      bool
+	SSOBrowserCookieSameSite    string
+	SSOBrowserSessionTTL        time.Duration
+	SSOAuthorizationCodeTTL     time.Duration
 
 	SupabaseURL       string
 	SupabasePublicKey string
@@ -63,26 +49,12 @@ func Load() (*Config, error) {
 			"SUPABASE_INVITE_REDIRECT_URL",
 			"https://sso.bp3kpsumatera2.com/accept-invite",
 		)),
-		SSOBrowserEnabled:             getEnvBool("SSO_BROWSER_ENABLED", false),
-		SSOBrowserSessionKey:          os.Getenv("SSO_BROWSER_SESSION_KEY"),
-		SSOBrowserCookieSecure:        getEnvBool("SSO_BROWSER_COOKIE_SECURE", true),
-		SSOBrowserCookieSameSite:      getEnv("SSO_BROWSER_COOKIE_SAME_SITE", "Lax"),
-		SSOBrowserSessionTTL:          getEnvDuration("SSO_BROWSER_SESSION_TTL", 8*time.Hour),
-		SSOAuthorizationCodeTTL:       getEnvDuration("SSO_AUTHORIZATION_CODE_TTL", 3*time.Minute),
-		SSOSilapetClientID:            strings.TrimSpace(getEnv("SSO_SILAPET_CLIENT_ID", "silapet-web")),
-		SSOSilapetApplicationCode:     strings.TrimSpace(getEnv("SSO_SILAPET_APPLICATION_CODE", "silapet")),
-		SSOSilapetAccessPolicy:        strings.ToUpper(strings.TrimSpace(getEnv("SSO_SILAPET_ACCESS_POLICY", "AUTO_USER"))),
-		SSOSilapetIntrospectionSecret: strings.TrimSpace(os.Getenv("SSO_SILAPET_INTROSPECTION_SECRET")),
-		SSOSilapetRedirectURIs:        splitCSV(os.Getenv("SSO_SILAPET_REDIRECT_URIS")),
-		SSOSilapetPostLogoutURIs:      splitCSV(os.Getenv("SSO_SILAPET_POST_LOGOUT_REDIRECT_URIS")),
-		PortalSilapetLaunchURL:        strings.TrimSpace(os.Getenv("PORTAL_SILAPET_LAUNCH_URL")),
-		SSOKlinikClientID:             strings.TrimSpace(getEnv("SSO_KLINIK_CLIENT_ID", "klinik-pkp-web")),
-		SSOKlinikApplicationCode:      strings.TrimSpace(getEnv("SSO_KLINIK_APPLICATION_CODE", "klinik_pkp")),
-		SSOKlinikAccessPolicy:         strings.ToUpper(strings.TrimSpace(getEnv("SSO_KLINIK_ACCESS_POLICY", "AUTO_USER"))),
-		SSOKlinikIntrospectionSecret:  strings.TrimSpace(os.Getenv("SSO_KLINIK_INTROSPECTION_SECRET")),
-		SSOKlinikRedirectURIs:         splitCSV(os.Getenv("SSO_KLINIK_REDIRECT_URIS")),
-		SSOKlinikPostLogoutURIs:       splitCSV(os.Getenv("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS")),
-		PortalKlinikLaunchURL:         strings.TrimSpace(os.Getenv("PORTAL_KLINIK_LAUNCH_URL")),
+		SSOBrowserEnabled:        getEnvBool("SSO_BROWSER_ENABLED", false),
+		SSOBrowserSessionKey:     os.Getenv("SSO_BROWSER_SESSION_KEY"),
+		SSOBrowserCookieSecure:   getEnvBool("SSO_BROWSER_COOKIE_SECURE", true),
+		SSOBrowserCookieSameSite: getEnv("SSO_BROWSER_COOKIE_SAME_SITE", "Lax"),
+		SSOBrowserSessionTTL:     getEnvDuration("SSO_BROWSER_SESSION_TTL", 8*time.Hour),
+		SSOAuthorizationCodeTTL:  getEnvDuration("SSO_AUTHORIZATION_CODE_TTL", 3*time.Minute),
 
 		SupabaseURL: os.Getenv("SUPABASE_URL"),
 
@@ -117,51 +89,6 @@ func Load() (*Config, error) {
 		if strings.TrimSpace(cfg.SSOBrowserSessionKey) == "" {
 			return nil, fmt.Errorf("SSO_BROWSER_SESSION_KEY is required when browser SSO is enabled")
 		}
-		if len(cfg.SSOSilapetRedirectURIs) == 0 {
-			return nil, fmt.Errorf("SSO_SILAPET_REDIRECT_URIS is required when browser SSO is enabled")
-		}
-		if len(cfg.SSOSilapetPostLogoutURIs) == 0 {
-			return nil, fmt.Errorf("SSO_SILAPET_POST_LOGOUT_REDIRECT_URIS is required when browser SSO is enabled")
-		}
-		if strings.TrimSpace(cfg.SSOSilapetClientID) == "" || strings.TrimSpace(cfg.SSOSilapetApplicationCode) == "" {
-			return nil, fmt.Errorf("SILAPET browser SSO client ID and application code are required")
-		}
-		if err := validateSSOClientSecurity("SILAPET", cfg.SSOSilapetAccessPolicy, cfg.SSOSilapetIntrospectionSecret); err != nil {
-			return nil, err
-		}
-		if err := validateSSOClientSecurity("KLINIK", cfg.SSOKlinikAccessPolicy, cfg.SSOKlinikIntrospectionSecret); err != nil {
-			return nil, err
-		}
-		if strings.TrimSpace(cfg.SSOKlinikClientID) == "" || strings.TrimSpace(cfg.SSOKlinikApplicationCode) == "" {
-			return nil, fmt.Errorf("Klinik browser SSO client ID and application code are required")
-		}
-		if strings.TrimSpace(cfg.SSOSilapetClientID) == strings.TrimSpace(cfg.SSOKlinikClientID) {
-			return nil, fmt.Errorf("browser SSO client IDs must be unique")
-		}
-		if len(cfg.SSOKlinikRedirectURIs) == 0 {
-			return nil, fmt.Errorf("SSO_KLINIK_REDIRECT_URIS is required when browser SSO is enabled")
-		}
-		if len(cfg.SSOKlinikPostLogoutURIs) == 0 {
-			return nil, fmt.Errorf("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS is required when browser SSO is enabled")
-		}
-		if err := validateConfiguredHTTPURLs("SSO_SILAPET_REDIRECT_URIS", cfg.SSOSilapetRedirectURIs); err != nil {
-			return nil, err
-		}
-		if err := validateConfiguredHTTPURLs("SSO_SILAPET_POST_LOGOUT_REDIRECT_URIS", cfg.SSOSilapetPostLogoutURIs); err != nil {
-			return nil, err
-		}
-		if err := validateConfiguredHTTPURLs("SSO_KLINIK_REDIRECT_URIS", cfg.SSOKlinikRedirectURIs); err != nil {
-			return nil, err
-		}
-		if err := validateConfiguredHTTPURLs("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS", cfg.SSOKlinikPostLogoutURIs); err != nil {
-			return nil, err
-		}
-		if err := validateConfiguredHTTPURLs("PORTAL_SILAPET_LAUNCH_URL", []string{cfg.PortalSilapetLaunchURL}); err != nil {
-			return nil, err
-		}
-		if err := validateConfiguredHTTPURLs("PORTAL_KLINIK_LAUNCH_URL", []string{cfg.PortalKlinikLaunchURL}); err != nil {
-			return nil, err
-		}
 		sameSite := strings.ToLower(strings.TrimSpace(cfg.SSOBrowserCookieSameSite))
 		if sameSite != "lax" && sameSite != "strict" && sameSite != "none" {
 			return nil, fmt.Errorf("SSO_BROWSER_COOKIE_SAME_SITE must be Lax, Strict, or None")
@@ -172,16 +99,6 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
-}
-
-func validateSSOClientSecurity(name, policy, secret string) error {
-	if policy != "AUTO_USER" && policy != "RESTRICTED" {
-		return fmt.Errorf("SSO_%s_ACCESS_POLICY must be AUTO_USER or RESTRICTED", name)
-	}
-	if len(strings.TrimSpace(secret)) < 32 {
-		return fmt.Errorf("SSO_%s_INTROSPECTION_SECRET must be at least 32 characters", name)
-	}
-	return nil
 }
 
 func validateConfiguredHTTPURLs(name string, values []string) error {
@@ -228,20 +145,6 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 	}
 
 	return parsed
-}
-
-func splitCSV(value string) []string {
-	parts := strings.Split(value, ",")
-	result := make([]string, 0, len(parts))
-
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			result = append(result, part)
-		}
-	}
-
-	return result
 }
 
 func getEnv(key, fallback string) string {

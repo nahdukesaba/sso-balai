@@ -61,6 +61,7 @@ SSO_BROWSER_SESSION_KEY=BASE64_32_BYTE_KEY
 SSO_BROWSER_COOKIE_SECURE=false
 SSO_BROWSER_COOKIE_SAME_SITE=Lax
 
+# Input untuk `go run ./cmd/sso-client`, tidak dibaca API.
 SSO_SILAPET_INTROSPECTION_SECRET=MINIMUM_32_CHARACTER_SECRET
 SSO_KLINIK_INTROSPECTION_SECRET=MINIMUM_32_CHARACTER_SECRET
 ```
@@ -119,6 +120,43 @@ public.custom_access_token_hook
 ```
 
 Jangan menjalankan `go run ./cmd/migrate down` kecuali memang ingin membatalkan satu migrasi dan sudah memahami dampak penghapusan skemanya.
+
+#### Daftarkan aplikasi Browser SSO
+
+Daftar aplikasi SSO disimpan di tabel `public.sso_clients`, bukan di `.env`. Jika `SSO_BROWSER_ENABLED=true`, API menolak start bila tabel ini kosong. Daftarkan aplikasi yang sudah ada:
+
+```powershell
+go run ./cmd/sso-client `
+  -client-id silapet-web -app silapet -access-policy AUTO_USER `
+  -redirect-uris http://silapet.test:8080/auth/sso/callback `
+  -post-logout-uris http://silapet.test:8080/login `
+  -launch-url http://silapet.test:8081/api/auth/sso/start `
+  -description "Portal layanan peminjaman fasilitas sarana, prasarana, serta kendaraan operasional resmi BP3KP Sumatera II" `
+  -secret-env SSO_SILAPET_INTROSPECTION_SECRET
+```
+
+```powershell
+go run ./cmd/sso-client `
+  -client-id klinik-pkp-web -app klinik_pkp -access-policy AUTO_USER `
+  -redirect-uris http://klinik-pkp.test:3000/auth/sso/callback `
+  -post-logout-uris http://klinik-pkp.test:3000/login `
+  -launch-url http://klinik-pkp.test:3000/api/auth/sso/start `
+  -description "Portal layanan informasi, konsultasi, dan pendampingan teknis perumahan serta permukiman BP3KP Sumatera II" `
+  -secret-env SSO_KLINIK_INTROSPECTION_SECRET
+```
+
+Menambah sistem baru tidak perlu mengubah kode. Simpan secret-nya di `.env` (misalnya `SSO_EOFFICE_INTROSPECTION_SECRET=...`, minimal 32 karakter), lalu jalankan perintah yang sama dengan `-name` agar baris `applications` ikut dibuat:
+
+```powershell
+go run ./cmd/sso-client `
+  -client-id eoffice-web -app eoffice -name "E-Office" -access-policy RESTRICTED `
+  -redirect-uris https://eoffice.example/auth/sso/callback `
+  -post-logout-uris https://eoffice.example/login `
+  -launch-url https://eoffice.example/api/auth/sso/start `
+  -secret-env SSO_EOFFICE_INTROSPECTION_SECRET
+```
+
+Perintah dengan `-client-id` yang sudah ada akan memperbarui datanya. Hanya hash SHA-256 secret yang disimpan. Restart API setelah mendaftarkan atau mengubah aplikasi. `AUTO_USER` otomatis memberi akses `user` saat login pertama; `RESTRICTED` menunggu admin memberi akses.
 
 ### 6. Buat akun bootstrap bila diperlukan
 
@@ -200,18 +238,16 @@ Pastikan repository `sso-balai`, `klinik-pkp`, `office-craft-api`, dan `office-c
 
 | Central SSO | Aplikasi pasangan |
 | --- | --- |
-| `SSO_KLINIK_CLIENT_ID` | Klinik `SSO_CLIENT_ID` |
-| `SSO_KLINIK_INTROSPECTION_SECRET` | Klinik `SSO_INTROSPECTION_SECRET` |
-| `SSO_SILAPET_CLIENT_ID` | SILAPET API `SSO_CLIENT_ID` |
-| `SSO_SILAPET_INTROSPECTION_SECRET` | SILAPET API `SSO_INTROSPECTION_SECRET` |
+| `-client-id` saat registrasi `cmd/sso-client` | Aplikasi `SSO_CLIENT_ID` |
+| Secret yang ditunjuk `-secret-env` | Aplikasi `SSO_INTROSPECTION_SECRET` |
 | Central berjalan di `http://127.0.0.1:18082` | `SSO_BASE_URL=http://127.0.0.1:18082` |
 
 Aturan penting:
 
-- `SSO_*_REDIRECT_URIS` di Central harus sama persis dengan redirect URI yang dikirim aplikasi.
-- `SSO_*_POST_LOGOUT_REDIRECT_URIS` harus sama persis dengan post-logout URI aplikasi.
-- `PORTAL_*_LAUNCH_URL` menunjuk endpoint start SSO milik aplikasi, bukan langsung ke halaman dashboard.
-- Setelah mengubah `.env`, restart service terkait.
+- `-redirect-uris` harus sama persis dengan redirect URI yang dikirim aplikasi.
+- `-post-logout-uris` harus sama persis dengan post-logout URI aplikasi.
+- `-launch-url` menunjuk endpoint start SSO milik aplikasi, bukan langsung ke halaman dashboard.
+- Setelah mendaftarkan ulang aplikasi atau mengubah `.env`, restart service terkait.
 
 Contoh URL lokal sudah tersedia pada `.env.example`. Sesuaikan port jika aplikasi mentor berjalan pada port berbeda, tetapi ubah kedua sisi secara bersamaan.
 
@@ -267,7 +303,7 @@ Urutan paling aman adalah database/Supabase, Central SSO, backend aplikasi, lalu
 ## Troubleshooting singkat
 
 - `DATABASE_URL is required`: `.env` tidak ditemukan atau connection string belum diisi.
-- Browser SSO gagal saat startup: periksa session key, kedua introspection secret, redirect URI, post-logout URI, dan launch URL.
+- Browser SSO gagal saat startup: periksa session key dan pastikan migrasi `000007` sudah jalan serta `public.sso_clients` berisi aplikasi aktif (`go run ./cmd/sso-client`).
 - Cookie login tidak tersimpan di lokal: pastikan `SSO_BROWSER_COOKIE_SECURE=false` selama menggunakan HTTP.
 - Email menuju URL yang salah: samakan `.env`, Supabase URL Configuration, dan email template.
 - Tombol **Buka Aplikasi** tidak muncul: membership harus `approved` dan launch URL harus valid.

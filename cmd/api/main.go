@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 
 	"github.com/gofiber/fiber/v2"
@@ -207,6 +208,14 @@ func main() {
 		if issuerErr != nil {
 			log.Fatalf("failed to initialize browser SSO session issuer: %v", issuerErr)
 		}
+		// shortcut: clients load once at startup; restart after `go run ./cmd/sso-client`.
+		ssoClients, clientsErr := repository.NewSSOClientRepository(db).ListActive(context.Background())
+		if clientsErr != nil {
+			log.Fatalf("failed to load browser SSO clients: %v", clientsErr)
+		}
+		if len(ssoClients) == 0 {
+			log.Fatal("browser SSO is enabled but public.sso_clients has no active client; register one with `go run ./cmd/sso-client`")
+		}
 		browserSSOService, err = services.NewBrowserSSOService(
 			browserSSORepository,
 			supabaseAuthService,
@@ -216,24 +225,7 @@ func main() {
 			applicationEnrollmentService,
 			identityService,
 			services.BrowserSSOConfig{
-				Clients: []services.BrowserSSOClient{
-					{
-						ClientID:               cfg.SSOSilapetClientID,
-						ApplicationCode:        cfg.SSOSilapetApplicationCode,
-						AccessPolicy:           cfg.SSOSilapetAccessPolicy,
-						IntrospectionSecret:    cfg.SSOSilapetIntrospectionSecret,
-						RedirectURIs:           cfg.SSOSilapetRedirectURIs,
-						PostLogoutRedirectURIs: cfg.SSOSilapetPostLogoutURIs,
-					},
-					{
-						ClientID:               cfg.SSOKlinikClientID,
-						ApplicationCode:        cfg.SSOKlinikApplicationCode,
-						AccessPolicy:           cfg.SSOKlinikAccessPolicy,
-						IntrospectionSecret:    cfg.SSOKlinikIntrospectionSecret,
-						RedirectURIs:           cfg.SSOKlinikRedirectURIs,
-						PostLogoutRedirectURIs: cfg.SSOKlinikPostLogoutURIs,
-					},
-				},
+				Clients:       ssoClients,
 				SessionTTL:    cfg.SSOBrowserSessionTTL,
 				CodeTTL:       cfg.SSOAuthorizationCodeTTL,
 				EncryptionKey: cfg.SSOBrowserSessionKey,
@@ -245,8 +237,6 @@ func main() {
 		accountPortalService, err = services.NewAccountPortalService(
 			browserSSOService,
 			applicationRepository,
-			cfg.PortalSilapetLaunchURL,
-			cfg.PortalKlinikLaunchURL,
 		)
 		if err != nil {
 			log.Fatalf("failed to initialize account portal: %v", err)

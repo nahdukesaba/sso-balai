@@ -141,18 +141,24 @@ func newHandlerBrowserSSOTestSetup(
 		services.BrowserSSOConfig{
 			Clients: []services.BrowserSSOClient{
 				{
-					IntrospectionSecret:    "handler-test-introspection-secret-0001",
-					ClientID:               "silapet-web",
-					ApplicationCode:        "silapet",
-					RedirectURIs:           []string{redirectURI},
-					PostLogoutRedirectURIs: []string{"http://localhost:8081/login", "http://silapet.test:8080/login"},
+					IntrospectionSecretHash: services.HashIntrospectionSecret("handler-test-introspection-secret-0001"),
+					ClientID:                "silapet-web",
+					ApplicationCode:         "silapet",
+					ApplicationName:         "SILAPET",
+					Description:             "Portal layanan peminjaman fasilitas sarana, prasarana, serta kendaraan operasional resmi BP3KP Sumatera II",
+					LaunchURL:               "http://silapet.test:8081/api/auth/sso/start",
+					RedirectURIs:            []string{redirectURI},
+					PostLogoutRedirectURIs:  []string{"http://localhost:8081/login", "http://silapet.test:8080/login"},
 				},
 				{
-					ClientID:               "klinik-pkp-web",
-					ApplicationCode:        "klinik_pkp",
-					IntrospectionSecret:    "klinik-test-introspection-secret-00001",
-					RedirectURIs:           []string{"http://localhost:3000/auth/sso/callback"},
-					PostLogoutRedirectURIs: []string{"http://localhost:3000/login", "http://klinik-pkp.test:3000/login"},
+					ClientID:                "klinik-pkp-web",
+					ApplicationCode:         "klinik_pkp",
+					ApplicationName:         "Klinik PKP",
+					Description:             "Portal layanan informasi, konsultasi, dan pendampingan teknis perumahan serta permukiman BP3KP Sumatera II",
+					LaunchURL:               "http://klinik-pkp.test:3000/api/auth/sso/start",
+					IntrospectionSecretHash: services.HashIntrospectionSecret("klinik-test-introspection-secret-00001"),
+					RedirectURIs:            []string{"http://localhost:3000/auth/sso/callback"},
+					PostLogoutRedirectURIs:  []string{"http://localhost:3000/login", "http://klinik-pkp.test:3000/login"},
 				},
 			},
 			SessionTTL: time.Hour, CodeTTL: 3 * time.Minute,
@@ -186,12 +192,7 @@ func mustRequestParameter(t *testing.T, location string) string {
 
 func withAccountPortal(t *testing.T, handler *BrowserSSOHandler) *BrowserSSOHandler {
 	t.Helper()
-	portal, err := services.NewAccountPortalService(
-		handler.service,
-		&handlerPortalApplications{},
-		"http://silapet.test:8081/api/auth/sso/start",
-		"http://klinik-pkp.test:3000/api/auth/sso/start",
-	)
+	portal, err := services.NewAccountPortalService(handler.service, &handlerPortalApplications{})
 	if err != nil {
 		t.Fatalf("create account portal: %v", err)
 	}

@@ -78,17 +78,14 @@ type BrowserSSOConfig struct {
 	EncryptionKey string
 }
 
-type BrowserSSOClient struct {
-	ClientID               string
-	ApplicationCode        string
-	AccessPolicy           string
-	IntrospectionSecret    string
-	RedirectURIs           []string
-	PostLogoutRedirectURIs []string
-}
+// BrowserSSOClient is loaded from public.sso_clients at startup.
+type BrowserSSOClient = models.SSOClient
 
 type registeredBrowserSSOClient struct {
 	applicationCode string
+	applicationName string
+	description     string
+	launchURL       string
 	accessPolicy    string
 	secretHash      [32]byte
 	redirectURIs    map[string]struct{}
@@ -104,6 +101,7 @@ type BrowserSSOService struct {
 	enrollments   BrowserSSOEnrollments
 	identities    BrowserSSOIdentities
 	clients       map[string]registeredBrowserSSOClient
+	clientByApp   map[string]string
 	sessionTTL    time.Duration
 	codeTTL       time.Duration
 	aead          cipher.AEAD
@@ -137,6 +135,10 @@ func NewBrowserSSOService(
 	if err != nil {
 		return nil, err
 	}
+	clientByApp := make(map[string]string, len(clients))
+	for clientID, client := range clients {
+		clientByApp[client.applicationCode] = clientID
+	}
 	if store == nil || auth == nil || sessionIssuer == nil || users == nil || applications == nil ||
 		enrollments == nil || identities == nil || len(clients) == 0 {
 		return nil, ErrBrowserSSODisabled
@@ -151,6 +153,7 @@ func NewBrowserSSOService(
 		enrollments:   enrollments,
 		identities:    identities,
 		clients:       clients,
+		clientByApp:   clientByApp,
 		sessionTTL:    config.SessionTTL,
 		codeTTL:       config.CodeTTL,
 		aead:          aead,
@@ -216,6 +219,7 @@ func (s *BrowserSSOService) ValidateCancelReturn(clientID, postLogoutRedirectURI
 
 func buildBrowserSSOClientRegistry(configs []BrowserSSOClient) (map[string]registeredBrowserSSOClient, error) {
 	clients := make(map[string]registeredBrowserSSOClient, len(configs))
+	applications := make(map[string]struct{}, len(configs))
 	for _, config := range configs {
 		clientID := strings.TrimSpace(config.ClientID)
 		applicationCode := strings.ToLower(strings.TrimSpace(config.ApplicationCode))
@@ -225,14 +229,19 @@ func buildBrowserSSOClientRegistry(configs []BrowserSSOClient) (map[string]regis
 		if _, exists := clients[clientID]; exists {
 			return nil, fmt.Errorf("%w: duplicate client ID %q", ErrBrowserSSODisabled, clientID)
 		}
+		if _, exists := applications[applicationCode]; exists {
+			return nil, fmt.Errorf("%w: application %q has more than one client", ErrBrowserSSODisabled, applicationCode)
+		}
+		applications[applicationCode] = struct{}{}
 		accessPolicy := normalizeApplicationAccessPolicy(config.AccessPolicy)
-		secret := strings.TrimSpace(config.IntrospectionSecret)
-		if len(secret) < 32 {
-			return nil, fmt.Errorf(
-				"%w: client %q introspection secret must be at least 32 characters",
-				ErrBrowserSSODisabled,
-				clientID,
-			)
+		var secretHash [32]byte
+		if len(config.IntrospectionSecretHash) != len(secretHash) {
+			return nil, fmt.Errorf("%w: client %q introspection secret hash must be 32 bytes", ErrBrowserSSODisabled, clientID)
+		}
+		copy(secretHash[:], config.IntrospectionSecretHash)
+		launchURL := strings.TrimSpace(config.LaunchURL)
+		if launchURL != "" && !validAbsoluteHTTPURL(launchURL) {
+			return nil, fmt.Errorf("%w: client %q launch URL must be an absolute HTTP(S) URL", ErrBrowserSSODisabled, clientID)
 		}
 
 		redirectURIs, err := buildBrowserSSOURIAllowlist(config.RedirectURIs)
@@ -245,13 +254,29 @@ func buildBrowserSSOClientRegistry(configs []BrowserSSOClient) (map[string]regis
 		}
 		clients[clientID] = registeredBrowserSSOClient{
 			applicationCode: applicationCode,
+			applicationName: strings.TrimSpace(config.ApplicationName),
+			description:     strings.TrimSpace(config.Description),
+			launchURL:       launchURL,
 			accessPolicy:    accessPolicy,
-			secretHash:      sha256.Sum256([]byte(secret)),
+			secretHash:      secretHash,
 			redirectURIs:    redirectURIs,
 			postLogoutURIs:  postLogoutURIs,
 		}
 	}
 	return clients, nil
+}
+
+// ValidateBrowserSSOClient applies the startup registry checks to one client,
+// so `cmd/sso-client` rejects a row the service would refuse to load.
+func ValidateBrowserSSOClient(client BrowserSSOClient) error {
+	_, err := buildBrowserSSOClientRegistry([]BrowserSSOClient{client})
+	return err
+}
+
+// HashIntrospectionSecret returns the value stored in sso_clients.
+func HashIntrospectionSecret(secret string) []byte {
+	hash := sha256.Sum256([]byte(strings.TrimSpace(secret)))
+	return hash[:]
 }
 
 func normalizeApplicationAccessPolicy(value string) string {
@@ -560,8 +585,7 @@ func (s *BrowserSSOService) Introspect(
 	appUserID string,
 ) (bool, error) {
 	client, ok := s.clients[strings.TrimSpace(clientID)]
-	providedHash := sha256.Sum256([]byte(strings.TrimSpace(secret)))
-	if !ok || subtle.ConstantTimeCompare(client.secretHash[:], providedHash[:]) != 1 {
+	if !ok || subtle.ConstantTimeCompare(client.secretHash[:], HashIntrospectionSecret(secret)) != 1 {
 		return false, ErrInvalidBrowserSession
 	}
 	sessionID = strings.TrimSpace(sessionID)

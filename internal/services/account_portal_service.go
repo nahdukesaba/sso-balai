@@ -14,63 +14,25 @@ type AccountPortalApplicationStore interface {
 	ListForPortalUser(context.Context, string) ([]models.PortalApplicationAccess, error)
 }
 
-type accountPortalApplicationMetadata struct {
-	Name        string
-	Description string
-	LaunchURL   string
-}
-
 type AccountPortalService struct {
 	browser      *BrowserSSOService
 	applications AccountPortalApplicationStore
-	metadata     map[string]accountPortalApplicationMetadata
 }
 
+// NewAccountPortalService takes app names, descriptions and launch URLs from
+// the Browser SSO client registry (public.sso_clients).
 func NewAccountPortalService(
 	browser *BrowserSSOService,
 	applications AccountPortalApplicationStore,
-	silapetLaunchURL string,
-	klinikLaunchURL string,
 ) (*AccountPortalService, error) {
 	if browser == nil || applications == nil {
 		return nil, errors.New("account portal dependencies are required")
 	}
-	silapetLaunchURL = strings.TrimSpace(silapetLaunchURL)
-	if !validPortalLaunchURL(silapetLaunchURL) {
-		return nil, errors.New("PORTAL_SILAPET_LAUNCH_URL must be an absolute HTTP(S) URL")
-	}
-	klinikLaunchURL = strings.TrimSpace(klinikLaunchURL)
-	if !validPortalLaunchURL(klinikLaunchURL) {
-		return nil, errors.New("PORTAL_KLINIK_LAUNCH_URL must be an absolute HTTP(S) URL")
-	}
-	return &AccountPortalService{
-		browser:      browser,
-		applications: applications,
-		metadata: map[string]accountPortalApplicationMetadata{
-			models.ApplicationCodeSilapet: {
-				Name:        "SILAPET",
-				Description: "Portal layanan peminjaman fasilitas sarana, prasarana, serta kendaraan operasional resmi BP3KP Sumatera II",
-				LaunchURL:   silapetLaunchURL,
-			},
-			models.ApplicationCodeKlinikPKP: {
-				Name:        "Klinik PKP",
-				Description: "Portal layanan informasi, konsultasi, dan pendampingan teknis perumahan serta permukiman BP3KP Sumatera II",
-				LaunchURL:   klinikLaunchURL,
-			},
-		},
-	}, nil
+	return &AccountPortalService{browser: browser, applications: applications}, nil
 }
 
-func validPortalLaunchURL(value string) bool {
-	if strings.ContainsAny(value, "*#") {
-		return false
-	}
-	parsed, err := url.ParseRequestURI(value)
-	if err != nil || parsed.Host == "" || parsed.User != nil {
-		return false
-	}
-	scheme := strings.ToLower(parsed.Scheme)
-	return scheme == "http" || scheme == "https"
+func (s *AccountPortalService) client(applicationCode string) registeredBrowserSSOClient {
+	return s.browser.clients[s.browser.clientByApp[strings.ToLower(strings.TrimSpace(applicationCode))]]
 }
 
 func (s *AccountPortalService) View(
@@ -88,8 +50,7 @@ func (s *AccountPortalService) View(
 		if pendingErr != nil {
 			return nil, pendingErr
 		}
-		metadata := s.metadata[applicationCode]
-		name := strings.TrimSpace(metadata.Name)
+		name := s.client(applicationCode).applicationName
 		if name == "" {
 			name = applicationCode
 		}
@@ -110,15 +71,15 @@ func (s *AccountPortalService) View(
 	}
 	view.Applications = make([]models.PortalApplicationCard, 0, len(accesses))
 	for _, access := range accesses {
-		metadata := s.metadata[strings.ToLower(strings.TrimSpace(access.Code))]
-		name := strings.TrimSpace(metadata.Name)
+		client := s.client(access.Code)
+		name := client.applicationName
 		if name == "" {
 			name = strings.TrimSpace(access.Name)
 		}
 		statusLabel := portalStatusLabel(access.Status, access.HasMembership)
 		roleLabel := portalRoleLabel(access.Role, access.HasMembership)
 		launchable := access.HasMembership && access.Status == models.MembershipStatusApproved &&
-			validPortalLaunchURL(metadata.LaunchURL)
+			client.launchURL != ""
 		launchURL := ""
 		if launchable {
 			launchURL = "/portal/launch?app=" + url.QueryEscape(access.Code)
@@ -126,7 +87,7 @@ func (s *AccountPortalService) View(
 		view.Applications = append(view.Applications, models.PortalApplicationCard{
 			Code:        access.Code,
 			Name:        name,
-			Description: metadata.Description,
+			Description: client.description,
 			StatusLabel: statusLabel,
 			RoleLabel:   roleLabel,
 			LaunchURL:   launchURL,
@@ -163,16 +124,11 @@ func (s *AccountPortalService) Launch(
 	if targetAccess == nil || !targetAccess.HasMembership || targetAccess.Status != models.MembershipStatusApproved {
 		return "", ErrAccountUnavailable
 	}
-	metadata, ok := s.metadata[appCode]
-	if !ok || !validPortalLaunchURL(metadata.LaunchURL) {
+	launchURL := s.client(appCode).launchURL
+	if launchURL == "" {
 		return "", ErrAccountUnavailable
 	}
-	return metadata.LaunchURL, nil
-}
-
-func (s *AccountPortalService) ConfiguredLaunchURL(applicationCode string) string {
-	appCode := strings.ToLower(strings.TrimSpace(applicationCode))
-	return s.metadata[appCode].LaunchURL
+	return launchURL, nil
 }
 
 func (s *AccountPortalService) Login(

@@ -43,12 +43,7 @@ func newAccountPortalHandler(
 		loginSession,
 	)
 	applicationStore := &handlerPortalApplications{applications: applications}
-	portal, err := services.NewAccountPortalService(
-		handler.service,
-		applicationStore,
-		"http://silapet.test:8081/api/auth/sso/start",
-		"http://klinik-pkp.test:3000/api/auth/sso/start",
-	)
+	portal, err := services.NewAccountPortalService(handler.service, applicationStore)
 	if err != nil {
 		t.Fatalf("create account portal: %v", err)
 	}

@@ -26,9 +26,7 @@ func TestAccountPortalLaunchRequiresApprovedMembershipAndServerURL(t *testing.T)
 	applications := &fakeAccountPortalApplications{applications: []models.PortalApplicationAccess{
 		{Code: "silapet", Name: "Browser supplied label", Role: "user", Status: models.MembershipStatusPending, HasMembership: true},
 	}}
-	portal, err := NewAccountPortalService(
-		browser, applications, "http://silapet.test:8081/api/auth/sso/start", "http://klinik-pkp.test:3000/api/auth/sso/start",
-	)
+	portal, err := NewAccountPortalService(browser, applications)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,20 +55,16 @@ func TestAccountPortalLaunchRequiresApprovedMembershipAndServerURL(t *testing.T)
 	}
 }
 
-func TestAccountPortalRejectsUnsafeLaunchConfiguration(t *testing.T) {
-	browser, _, _, _, _, _ := newBrowserSSOTestService(t)
-	for _, launchURL := range []string{"", "/relative", "javascript:alert(1)", "https://user@example.com/"} {
-		if _, err := NewAccountPortalService(
-			browser, &fakeAccountPortalApplications{}, launchURL, "http://localhost:3000/",
-		); err == nil {
-			t.Fatalf("unsafe launch URL accepted: %q", launchURL)
+func TestBrowserSSOClientRejectsUnsafeLaunchURL(t *testing.T) {
+	for _, launchURL := range []string{"/relative", "javascript:alert(1)", "https://user@example.com/", "https://*.example.com/"} {
+		client := BrowserSSOClient{
+			ClientID: "client", ApplicationCode: "app", LaunchURL: launchURL,
+			IntrospectionSecretHash: HashIntrospectionSecret("client-test-introspection-secret-000001"),
+			RedirectURIs:            []string{"http://localhost/callback"},
+			PostLogoutRedirectURIs:  []string{"http://localhost/login"},
 		}
-	}
-	for _, launchURL := range []string{"", "/relative", "javascript:alert(1)", "https://user@example.com/"} {
-		if _, err := NewAccountPortalService(
-			browser, &fakeAccountPortalApplications{}, "http://localhost:8081/", launchURL,
-		); err == nil {
-			t.Fatalf("unsafe Klinik launch URL accepted: %q", launchURL)
+		if err := ValidateBrowserSSOClient(client); err == nil {
+			t.Fatalf("unsafe launch URL accepted: %q", launchURL)
 		}
 	}
 }
@@ -86,9 +80,7 @@ func TestAccountPortalKlinikMetadataAndApplicationSpecificAccess(t *testing.T) {
 			Status: models.MembershipStatusApproved, HasMembership: true,
 		},
 	}}
-	portal, err := NewAccountPortalService(
-		browser, applications, "http://silapet.test:8081/api/auth/sso/start", "http://klinik-pkp.test:3000/api/auth/sso/start",
-	)
+	portal, err := NewAccountPortalService(browser, applications)
 	if err != nil {
 		t.Fatal(err)
 	}
