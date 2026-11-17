@@ -76,33 +76,6 @@ type SupabaseAuthIdentityLoader interface {
 	) (*models.Identity, error)
 }
 
-type LegacyPasswordVerifier interface {
-	VerifyUserPassword(
-		ctx context.Context,
-		appUserID string,
-		password string,
-	) (*models.AuthCredential, error)
-}
-
-type LegacyMigrationAdmin interface {
-	FindUserByEmail(
-		ctx context.Context,
-		email string,
-	) (*models.SupabaseAuthUser, error)
-
-	CreateUser(
-		ctx context.Context,
-		email string,
-		password string,
-		fullName string,
-	) (*models.SupabaseAuthUser, error)
-
-	DeleteUser(
-		ctx context.Context,
-		userID string,
-	) error
-}
-
 type ActiveAuthenticationService interface {
 	Login(
 		ctx context.Context,
@@ -144,8 +117,6 @@ type SupabaseCentralAuthService struct {
 	applications SupabaseAuthApplicationResolver
 	enrollments  RequestAccessEnrollmentService
 	identities   SupabaseAuthIdentityLoader
-	credentials  LegacyPasswordVerifier
-	admin        LegacyMigrationAdmin
 }
 
 func NewSupabaseCentralAuthService(
@@ -154,8 +125,6 @@ func NewSupabaseCentralAuthService(
 	applications SupabaseAuthApplicationResolver,
 	enrollments RequestAccessEnrollmentService,
 	identities SupabaseAuthIdentityLoader,
-	credentials LegacyPasswordVerifier,
-	admin LegacyMigrationAdmin,
 ) *SupabaseCentralAuthService {
 	return &SupabaseCentralAuthService{
 		auth:         auth,
@@ -163,8 +132,6 @@ func NewSupabaseCentralAuthService(
 		applications: applications,
 		enrollments:  enrollments,
 		identities:   identities,
-		credentials:  credentials,
-		admin:        admin,
 	}
 }
 
@@ -208,20 +175,14 @@ func (s *SupabaseCentralAuthService) Login(
 		return nil, ErrAccountUnavailable
 	}
 
-	// A mapped user always authenticates directly through Supabase. Never
-	// fall back to the retained legacy credential after mapping exists.
-	if user.AuthUserID != nil {
-		return s.signInAndComplete(
-			ctx,
-			email,
-			password,
-			application,
-		)
+	// An unmapped user cannot authenticate through Supabase Auth.
+	if user.AuthUserID == nil {
+		return nil, ErrAccountUnavailable
 	}
 
-	return s.migrateLegacyAndSignIn(
+	return s.signInAndComplete(
 		ctx,
-		user,
+		email,
 		password,
 		application,
 	)
@@ -356,273 +317,6 @@ func (s *SupabaseCentralAuthService) enrollMissingApplication(
 	}
 
 	return nil
-}
-
-func (s *SupabaseCentralAuthService) migrateLegacyAndSignIn(
-	ctx context.Context,
-	user *models.AppUser,
-	password string,
-	application string,
-) (*models.LoginResult, error) {
-	if s.credentials == nil || s.admin == nil {
-		return nil, ErrAuthUnavailable
-	}
-
-	if err := legacyUserStatusError(user.Status); err != nil {
-		return nil, err
-	}
-
-	appContext, err := s.resolveLoginApplication(
-		ctx,
-		user.ID,
-		application,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := membershipLoginStatusError(appContext.Status); err != nil {
-		return nil, err
-	}
-
-	_, err = s.credentials.VerifyUserPassword(
-		ctx,
-		user.ID,
-		password,
-	)
-	if err != nil {
-		if errors.Is(err, ErrInvalidCredentials) ||
-			errors.Is(err, ErrCredentialNotFound) {
-
-			return nil, ErrInvalidCredentials
-		}
-
-		return nil, fmt.Errorf("verify legacy credential: %w", err)
-	}
-
-	authUserID, err := s.ensureLegacyAuthIdentity(
-		ctx,
-		user,
-		password,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Resolve the committed mapping before signing in. This also prevents a
-	// concurrent request from substituting a different auth identity.
-	currentUser, err := s.users.GetByIDIncludingDeleted(ctx, user.ID)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"resolve migrated login identity: %w",
-			err,
-		)
-	}
-
-	if !isLinkedToAuthUser(currentUser, authUserID) {
-		return nil, ErrAuthUnavailable
-	}
-
-	return s.signInAndComplete(
-		ctx,
-		user.Email,
-		password,
-		application,
-	)
-}
-
-func (s *SupabaseCentralAuthService) resolveLoginApplication(
-	ctx context.Context,
-	appUserID string,
-	application string,
-) (*models.ApplicationContext, error) {
-	appContext, err := s.applications.GetByAppUserID(
-		ctx,
-		appUserID,
-		application,
-	)
-	if err != nil {
-		switch {
-		case errors.Is(err, ErrApplicationUnavailable):
-			return nil, ErrUnsupportedApplication
-
-		case errors.Is(err, ErrApplicationMembershipUnavailable):
-			return nil, ErrAccountUnavailable
-
-		default:
-			return nil, fmt.Errorf(
-				"resolve login application: %w",
-				err,
-			)
-		}
-	}
-
-	if appContext == nil ||
-		strings.TrimSpace(appContext.ApplicationID) == "" ||
-		strings.TrimSpace(appContext.Role) == "" {
-
-		return nil, ErrAccountUnavailable
-	}
-
-	return appContext, nil
-}
-
-func (s *SupabaseCentralAuthService) ensureLegacyAuthIdentity(
-	ctx context.Context,
-	user *models.AppUser,
-	password string,
-) (string, error) {
-	authUser, err := s.admin.FindUserByEmail(ctx, user.Email)
-	if err != nil {
-		return "", fmt.Errorf(
-			"%w: find legacy migration auth user: %v",
-			ErrAuthUnavailable,
-			err,
-		)
-	}
-
-	createdByRequest := false
-	if authUser == nil {
-		authUser, err = s.admin.CreateUser(
-			ctx,
-			user.Email,
-			password,
-			user.FullName,
-		)
-		if err != nil {
-			// A concurrent request may have created the same unique email after
-			// the initial lookup. Resolve it before treating create as failed.
-			authUser, _ = s.admin.FindUserByEmail(ctx, user.Email)
-			if authUser == nil {
-				return "", fmt.Errorf(
-					"%w: create legacy migration auth user: %v",
-					ErrAuthUnavailable,
-					err,
-				)
-			}
-		} else {
-			createdByRequest = true
-		}
-	}
-
-	if authUser == nil || strings.TrimSpace(authUser.ID) == "" {
-		return "", ErrAuthUnavailable
-	}
-
-	authUserID := strings.TrimSpace(authUser.ID)
-	if !createdByRequest {
-		if err := s.verifyExistingMigrationIdentity(
-			ctx,
-			user.Email,
-			password,
-			authUserID,
-		); err != nil {
-
-			return "", err
-		}
-	}
-
-	linked, linkErr := s.users.LinkAuthUserIDIfUnset(
-		ctx,
-		user.ID,
-		authUserID,
-	)
-	if linked && linkErr == nil {
-		return authUserID, nil
-	}
-
-	currentUser, resolveErr := s.users.GetByIDIncludingDeleted(
-		ctx,
-		user.ID,
-	)
-	if resolveErr == nil && isLinkedToAuthUser(currentUser, authUserID) {
-		return authUserID, nil
-	}
-
-	if createdByRequest {
-		if deleteErr := s.admin.DeleteUser(
-			context.Background(),
-			authUserID,
-		); deleteErr != nil {
-
-			return "", fmt.Errorf(
-				"%w: legacy migration compensation failed: %v",
-				ErrAuthUnavailable,
-				deleteErr,
-			)
-		}
-	}
-
-	if linkErr != nil {
-		return "", fmt.Errorf(
-			"%w: link legacy auth identity: %v",
-			ErrAuthUnavailable,
-			linkErr,
-		)
-	}
-
-	if resolveErr != nil {
-		return "", fmt.Errorf(
-			"%w: resolve concurrent legacy mapping: %v",
-			ErrAuthUnavailable,
-			resolveErr,
-		)
-	}
-
-	return "", ErrAuthUnavailable
-}
-
-func (s *SupabaseCentralAuthService) verifyExistingMigrationIdentity(
-	ctx context.Context,
-	email string,
-	password string,
-	expectedAuthUserID string,
-) error {
-	session, err := s.auth.SignInWithPassword(ctx, email, password)
-	if err != nil {
-		return fmt.Errorf(
-			"%w: existing Supabase identity does not match legacy credential",
-			ErrAuthUnavailable,
-		)
-	}
-
-	if session == nil ||
-		strings.TrimSpace(session.AccessToken) == "" ||
-		strings.TrimSpace(session.User.ID) != expectedAuthUserID {
-
-		return ErrAuthUnavailable
-	}
-
-	s.signOutQuietly(session.AccessToken)
-
-	return nil
-}
-
-func legacyUserStatusError(status string) error {
-	switch status {
-	case models.UserStatusApproved:
-		return nil
-
-	case models.UserStatusPending:
-		return ErrAccountPending
-
-	case models.UserStatusRejected:
-		return ErrAccountRejected
-
-	default:
-		return ErrAccountUnavailable
-	}
-}
-
-func isLinkedToAuthUser(
-	user *models.AppUser,
-	authUserID string,
-) bool {
-	return user != nil &&
-		user.DeletedAt == nil &&
-		user.AuthUserID != nil &&
-		strings.TrimSpace(*user.AuthUserID) ==
-			strings.TrimSpace(authUserID)
 }
 
 func (s *SupabaseCentralAuthService) Refresh(
