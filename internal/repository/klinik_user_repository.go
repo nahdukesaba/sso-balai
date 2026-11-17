@@ -12,6 +12,8 @@ import (
 	"github.com/nahdukesaba/sso-balai/internal/models"
 )
 
+// KlinikUserRepository is limited to the legacy klinikpkp_user migration
+// boundary. Canonical login and authorization must not depend on this store.
 type KlinikUserRepository struct {
 	pool *pgxpool.Pool
 }

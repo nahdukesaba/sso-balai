@@ -1,8 +1,10 @@
 package models
 
-// KlinikIdentity is the canonical Klinik PKP projection. Identity and profile
-// fields come from app_users/app_pegawai, while role and status are scoped to
-// the klinik_pkp application membership.
+// KlinikIdentity does not introduce a Klinik-owned identity. It is a read
+// projection over the shared app_users identity, app_pegawai profile, and the
+// klinik_pkp membership. Keeping role and status in this projection prevents
+// callers from accidentally treating the global app_users fields as
+// application authorization.
 type KlinikIdentity struct {
 	AppUserID       string
 	AuthUserID      string

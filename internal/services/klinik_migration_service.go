@@ -38,6 +38,10 @@ func NewKlinikMigrationService(
 	}
 }
 
+// Migrate proves ownership with the legacy Klinik password before creating a
+// canonical Supabase/app_users identity. Existing Central identities are
+// rejected instead of reused because a legacy password cannot prove ownership
+// of an independently created Central account with the same email address.
 func (s *KlinikMigrationService) Migrate(
 	ctx context.Context,
 	email string,

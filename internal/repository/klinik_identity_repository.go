@@ -22,6 +22,9 @@ func NewKlinikIdentityRepository(
 	return &KlinikIdentityRepository{pool: pool}
 }
 
+// GetByAppUserID deliberately resolves identity and application authorization
+// together. The application filter ensures role/status always belong to the
+// klinik_pkp membership, even when the same app_user accesses other apps.
 func (r *KlinikIdentityRepository) GetByAppUserID(
 	ctx context.Context,
 	appUserID string,
