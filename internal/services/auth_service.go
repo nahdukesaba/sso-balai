@@ -37,10 +37,6 @@ func membershipLoginStatusError(status string) error {
 	}
 }
 
-// TODO(auth-cleanup): AuthService still carries klinikMigrationService as a
-// dormant dependency. Decide whether to remove it after production migration
-// and rollback requirements are confirmed; Login now delegates exclusively to
-// activeAuthenticationService.
 type AuthService struct {
 	supabaseAuthService          *SupabaseAuthService
 	adminService                 *SupabaseAdminService
@@ -48,7 +44,6 @@ type AuthService struct {
 	userRepository               *repository.UserRepository
 	klinikContextService         *KlinikContextService
 	applicationContextService    *ApplicationContextService
-	klinikMigrationService       *KlinikMigrationService
 	applicationEnrollmentService *ApplicationEnrollmentService
 	requestAccessService         RequestAccessEnrollment
 	activeAuthenticationService  ActiveAuthenticationService
@@ -73,7 +68,6 @@ func NewAuthService(
 	userRepository *repository.UserRepository,
 	klinikContextService *KlinikContextService,
 	applicationContextService *ApplicationContextService,
-	klinikMigrationService *KlinikMigrationService,
 ) *AuthService {
 	return &AuthService{
 		supabaseAuthService:       supabaseAuthService,
@@ -82,7 +76,6 @@ func NewAuthService(
 		userRepository:            userRepository,
 		klinikContextService:      klinikContextService,
 		applicationContextService: applicationContextService,
-		klinikMigrationService:    klinikMigrationService,
 	}
 }
 

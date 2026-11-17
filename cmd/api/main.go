@@ -30,12 +30,10 @@ func main() {
 
 	userRepository := repository.NewUserRepository(db)
 	pegawaiRepository := repository.NewPegawaiRepository(db)
-	klinikUserRepository := repository.NewKlinikUserRepository(db)
 	klinikIdentityRepository :=
 		repository.NewKlinikIdentityRepository(db)
 	applicationRepository := repository.NewApplicationRepository(db)
 	membershipRepository := repository.NewMembershipRepository(db)
-	credentialRepository := repository.NewCredentialRepository(db)
 	centralRegistrationRepository :=
 		repository.NewCentralRegistrationRepository(db)
 	klinikAdminUserRepository := repository.NewKlinikAdminUserRepository(db)
@@ -58,10 +56,6 @@ func main() {
 	applicationContextService := services.NewApplicationContextService(
 		applicationRepository,
 		membershipRepository,
-	)
-
-	credentialService := services.NewCredentialService(
-		credentialRepository,
 	)
 
 	applicationEnrollmentService :=
@@ -119,8 +113,6 @@ func main() {
 			applicationContextService,
 			applicationEnrollmentService,
 			identityService,
-			credentialService,
-			supabaseAdminService,
 		)
 
 	registrationService :=
@@ -130,21 +122,6 @@ func main() {
 			supabaseAdminService,
 			centralRegistrationRepository,
 		)
-
-	// TODO(auth-cleanup): This legacy migration graph is still constructed even
-	// though the active login path does not invoke it. Confirm production
-	// migration and rollback requirements before removing it.
-	klinikCredentialService := services.NewKlinikCredentialService(
-		klinikUserRepository,
-	)
-
-	klinikMigrationService := services.NewKlinikMigrationService(
-		klinikCredentialService,
-		supabaseAdminService,
-		userRepository,
-		pegawaiRepository,
-		klinikUserRepository,
-	)
 
 	requestAccessService :=
 		services.NewCentralRequestAccessService(
@@ -160,7 +137,6 @@ func main() {
 		userRepository,
 		klinikContextService,
 		applicationContextService,
-		klinikMigrationService,
 	)
 
 	authService.SetRegistrationService(
@@ -236,6 +212,14 @@ func main() {
 						RedirectURIs:           cfg.SSOKlinikRedirectURIs,
 						PostLogoutRedirectURIs: cfg.SSOKlinikPostLogoutURIs,
 					},
+					{
+						ClientID:               cfg.SSOArsiparisClientID,
+						ApplicationCode:        cfg.SSOArsiparisApplicationCode,
+						AccessPolicy:           cfg.SSOArsiparisAccessPolicy,
+						IntrospectionSecret:    cfg.SSOArsiparisIntrospectionSecret,
+						RedirectURIs:           cfg.SSOArsiparisRedirectURIs,
+						PostLogoutRedirectURIs: cfg.SSOArsiparisPostLogoutURIs,
+					},
 				},
 				SessionTTL:    cfg.SSOBrowserSessionTTL,
 				CodeTTL:       cfg.SSOAuthorizationCodeTTL,
@@ -250,6 +234,7 @@ func main() {
 			applicationRepository,
 			cfg.PortalSilapetLaunchURL,
 			cfg.PortalKlinikLaunchURL,
+			cfg.PortalArsiparisLaunchURL,
 		)
 		if err != nil {
 			log.Fatalf("failed to initialize account portal: %v", err)

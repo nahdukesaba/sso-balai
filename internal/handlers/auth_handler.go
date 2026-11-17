@@ -1117,12 +1117,6 @@ func handleLoginError(c *fiber.Ctx, err error) error {
 			"message": "Terlalu banyak percobaan login. Coba kembali nanti.",
 		})
 
-	case errors.Is(err, services.ErrKlinikMigrationConflict):
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error":   "identity_conflict",
-			"message": "Identitas akun tidak dapat dimigrasikan secara otomatis.",
-		})
-
 	case errors.Is(err, services.ErrAuthUnavailable):
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"error":   "auth_unavailable",
