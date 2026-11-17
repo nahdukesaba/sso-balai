@@ -48,6 +48,7 @@ func newAccountPortalHandler(
 		applicationStore,
 		"http://silapet.test:8081/api/auth/sso/start",
 		"http://klinik-pkp.test:3000/api/auth/sso/start",
+		"http://localhost:8083/api/auth/sso/start",
 	)
 	if err != nil {
 		t.Fatalf("create account portal: %v", err)

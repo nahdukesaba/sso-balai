@@ -37,6 +37,7 @@ type Config struct {
 	SSOKlinikRedirectURIs           []string
 	SSOKlinikPostLogoutURIs         []string
 	PortalKlinikLaunchURL           string
+	SSOArsiparisEnabled             bool
 	SSOArsiparisClientID            string
 	SSOArsiparisApplicationCode     string
 	SSOArsiparisAccessPolicy        string
@@ -90,6 +91,7 @@ func Load() (*Config, error) {
 		SSOKlinikRedirectURIs:           splitCSV(os.Getenv("SSO_KLINIK_REDIRECT_URIS")),
 		SSOKlinikPostLogoutURIs:         splitCSV(os.Getenv("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS")),
 		PortalKlinikLaunchURL:           strings.TrimSpace(os.Getenv("PORTAL_KLINIK_LAUNCH_URL")),
+		SSOArsiparisEnabled:             getEnvBool("SSO_ARSIPARIS_ENABLED", false),
 		SSOArsiparisClientID:            strings.TrimSpace(getEnv("SSO_ARSIPARIS_CLIENT_ID", "arsiparis-web")),
 		SSOArsiparisApplicationCode:     strings.TrimSpace(getEnv("SSO_ARSIPARIS_APPLICATION_CODE", "arsiparis")),
 		SSOArsiparisAccessPolicy:        strings.ToUpper(strings.TrimSpace(getEnv("SSO_ARSIPARIS_ACCESS_POLICY", "AUTO_USER"))),
@@ -146,19 +148,12 @@ func Load() (*Config, error) {
 		if err := validateSSOClientSecurity("KLINIK", cfg.SSOKlinikAccessPolicy, cfg.SSOKlinikIntrospectionSecret); err != nil {
 			return nil, err
 		}
-		if err := validateSSOClientSecurity("ARSIPARIS", cfg.SSOArsiparisAccessPolicy, cfg.SSOArsiparisIntrospectionSecret); err != nil {
-			return nil, err
-		}
 		if strings.TrimSpace(cfg.SSOKlinikClientID) == "" || strings.TrimSpace(cfg.SSOKlinikApplicationCode) == "" {
 			return nil, fmt.Errorf("Klinik browser SSO client ID and application code are required")
 		}
-		if strings.TrimSpace(cfg.SSOArsiparisClientID) == "" || strings.TrimSpace(cfg.SSOArsiparisApplicationCode) == "" {
-			return nil, fmt.Errorf("Arsiparis browser SSO client ID and application code are required")
-		}
 		silapetClientID := strings.TrimSpace(cfg.SSOSilapetClientID)
 		klinikClientID := strings.TrimSpace(cfg.SSOKlinikClientID)
-		arsiparisClientID := strings.TrimSpace(cfg.SSOArsiparisClientID)
-		if silapetClientID == klinikClientID || silapetClientID == arsiparisClientID || klinikClientID == arsiparisClientID {
+		if silapetClientID == klinikClientID {
 			return nil, fmt.Errorf("browser SSO client IDs must be unique")
 		}
 		if len(cfg.SSOKlinikRedirectURIs) == 0 {
@@ -166,12 +161,6 @@ func Load() (*Config, error) {
 		}
 		if len(cfg.SSOKlinikPostLogoutURIs) == 0 {
 			return nil, fmt.Errorf("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS is required when browser SSO is enabled")
-		}
-		if len(cfg.SSOArsiparisRedirectURIs) == 0 {
-			return nil, fmt.Errorf("SSO_ARSIPARIS_REDIRECT_URIS is required when browser SSO is enabled")
-		}
-		if len(cfg.SSOArsiparisPostLogoutURIs) == 0 {
-			return nil, fmt.Errorf("SSO_ARSIPARIS_POST_LOGOUT_REDIRECT_URIS is required when browser SSO is enabled")
 		}
 		if err := validateConfiguredHTTPURLs("SSO_SILAPET_REDIRECT_URIS", cfg.SSOSilapetRedirectURIs); err != nil {
 			return nil, err
@@ -185,20 +174,39 @@ func Load() (*Config, error) {
 		if err := validateConfiguredHTTPURLs("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS", cfg.SSOKlinikPostLogoutURIs); err != nil {
 			return nil, err
 		}
-		if err := validateConfiguredHTTPURLs("SSO_ARSIPARIS_REDIRECT_URIS", cfg.SSOArsiparisRedirectURIs); err != nil {
-			return nil, err
-		}
-		if err := validateConfiguredHTTPURLs("SSO_ARSIPARIS_POST_LOGOUT_REDIRECT_URIS", cfg.SSOArsiparisPostLogoutURIs); err != nil {
-			return nil, err
-		}
 		if err := validateConfiguredHTTPURLs("PORTAL_SILAPET_LAUNCH_URL", []string{cfg.PortalSilapetLaunchURL}); err != nil {
 			return nil, err
 		}
 		if err := validateConfiguredHTTPURLs("PORTAL_KLINIK_LAUNCH_URL", []string{cfg.PortalKlinikLaunchURL}); err != nil {
 			return nil, err
 		}
-		if err := validateConfiguredHTTPURLs("PORTAL_ARSIPARIS_LAUNCH_URL", []string{cfg.PortalArsiparisLaunchURL}); err != nil {
-			return nil, err
+
+		if cfg.SSOArsiparisEnabled {
+			if err := validateSSOClientSecurity("ARSIPARIS", cfg.SSOArsiparisAccessPolicy, cfg.SSOArsiparisIntrospectionSecret); err != nil {
+				return nil, err
+			}
+			if strings.TrimSpace(cfg.SSOArsiparisClientID) == "" || strings.TrimSpace(cfg.SSOArsiparisApplicationCode) == "" {
+				return nil, fmt.Errorf("Arsiparis browser SSO client ID and application code are required")
+			}
+			arsiparisClientID := strings.TrimSpace(cfg.SSOArsiparisClientID)
+			if silapetClientID == arsiparisClientID || klinikClientID == arsiparisClientID {
+				return nil, fmt.Errorf("browser SSO client IDs must be unique")
+			}
+			if len(cfg.SSOArsiparisRedirectURIs) == 0 {
+				return nil, fmt.Errorf("SSO_ARSIPARIS_REDIRECT_URIS is required when browser SSO is enabled")
+			}
+			if len(cfg.SSOArsiparisPostLogoutURIs) == 0 {
+				return nil, fmt.Errorf("SSO_ARSIPARIS_POST_LOGOUT_REDIRECT_URIS is required when browser SSO is enabled")
+			}
+			if err := validateConfiguredHTTPURLs("SSO_ARSIPARIS_REDIRECT_URIS", cfg.SSOArsiparisRedirectURIs); err != nil {
+				return nil, err
+			}
+			if err := validateConfiguredHTTPURLs("SSO_ARSIPARIS_POST_LOGOUT_REDIRECT_URIS", cfg.SSOArsiparisPostLogoutURIs); err != nil {
+				return nil, err
+			}
+			if err := validateConfiguredHTTPURLs("PORTAL_ARSIPARIS_LAUNCH_URL", []string{cfg.PortalArsiparisLaunchURL}); err != nil {
+				return nil, err
+			}
 		}
 		sameSite := strings.ToLower(strings.TrimSpace(cfg.SSOBrowserCookieSameSite))
 		if sameSite != "lax" && sameSite != "strict" && sameSite != "none" {

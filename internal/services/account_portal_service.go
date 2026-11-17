@@ -51,26 +51,29 @@ func NewAccountPortalService(
 			return nil, errors.New("PORTAL_ARSIPARIS_LAUNCH_URL must be an absolute HTTP(S) URL")
 		}
 	}
+	metadata := map[string]accountPortalApplicationMetadata{
+		models.ApplicationCodeSilapet: {
+			Name:        "SILAPET",
+			Description: "Portal layanan peminjaman fasilitas sarana, prasarana, serta kendaraan operasional resmi BP3KP Sumatera II",
+			LaunchURL:   silapetLaunchURL,
+		},
+		models.ApplicationCodeKlinikPKP: {
+			Name:        "Klinik PKP",
+			Description: "Portal layanan informasi, konsultasi, dan pendampingan teknis perumahan serta permukiman BP3KP Sumatera II",
+			LaunchURL:   klinikLaunchURL,
+		},
+	}
+	if resolvedArsiparisLaunchURL != "" {
+		metadata[models.ApplicationCodeArsiparis] = accountPortalApplicationMetadata{
+			Name:        "Arsiparis",
+			Description: "Portal layanan pengelolaan arsip kegiatan, laporan, dan bukti dukung resmi BP3KP Sumatera II",
+			LaunchURL:   resolvedArsiparisLaunchURL,
+		}
+	}
 	return &AccountPortalService{
 		browser:      browser,
 		applications: applications,
-		metadata: map[string]accountPortalApplicationMetadata{
-			models.ApplicationCodeSilapet: {
-				Name:        "SILAPET",
-				Description: "Portal layanan peminjaman fasilitas sarana, prasarana, serta kendaraan operasional resmi BP3KP Sumatera II",
-				LaunchURL:   silapetLaunchURL,
-			},
-			models.ApplicationCodeKlinikPKP: {
-				Name:        "Klinik PKP",
-				Description: "Portal layanan informasi, konsultasi, dan pendampingan teknis perumahan serta permukiman BP3KP Sumatera II",
-				LaunchURL:   klinikLaunchURL,
-			},
-			models.ApplicationCodeArsiparis: {
-				Name:        "Arsiparis",
-				Description: "Portal layanan pengelolaan arsip kegiatan, laporan, dan bukti dukung resmi BP3KP Sumatera II",
-				LaunchURL:   resolvedArsiparisLaunchURL,
-			},
-		},
+		metadata:     metadata,
 	}, nil
 }
 
@@ -123,7 +126,10 @@ func (s *AccountPortalService) View(
 	}
 	view.Applications = make([]models.PortalApplicationCard, 0, len(accesses))
 	for _, access := range accesses {
-		metadata := s.metadata[strings.ToLower(strings.TrimSpace(access.Code))]
+		metadata, ok := s.metadata[strings.ToLower(strings.TrimSpace(access.Code))]
+		if !ok {
+			continue
+		}
 		name := strings.TrimSpace(metadata.Name)
 		if name == "" {
 			name = strings.TrimSpace(access.Name)
