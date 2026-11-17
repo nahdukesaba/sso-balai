@@ -31,6 +31,7 @@ func NewAccountPortalService(
 	applications AccountPortalApplicationStore,
 	silapetLaunchURL string,
 	klinikLaunchURL string,
+	arsiparisLaunchURL ...string,
 ) (*AccountPortalService, error) {
 	if browser == nil || applications == nil {
 		return nil, errors.New("account portal dependencies are required")
@@ -42,6 +43,13 @@ func NewAccountPortalService(
 	klinikLaunchURL = strings.TrimSpace(klinikLaunchURL)
 	if !validPortalLaunchURL(klinikLaunchURL) {
 		return nil, errors.New("PORTAL_KLINIK_LAUNCH_URL must be an absolute HTTP(S) URL")
+	}
+	var resolvedArsiparisLaunchURL string
+	if len(arsiparisLaunchURL) > 0 {
+		resolvedArsiparisLaunchURL = strings.TrimSpace(arsiparisLaunchURL[0])
+		if !validPortalLaunchURL(resolvedArsiparisLaunchURL) {
+			return nil, errors.New("PORTAL_ARSIPARIS_LAUNCH_URL must be an absolute HTTP(S) URL")
+		}
 	}
 	return &AccountPortalService{
 		browser:      browser,
@@ -56,6 +64,11 @@ func NewAccountPortalService(
 				Name:        "Klinik PKP",
 				Description: "Portal layanan informasi, konsultasi, dan pendampingan teknis perumahan serta permukiman BP3KP Sumatera II",
 				LaunchURL:   klinikLaunchURL,
+			},
+			models.ApplicationCodeArsiparis: {
+				Name:        "Arsiparis",
+				Description: "Portal layanan pengelolaan arsip kegiatan, laporan, dan bukti dukung resmi BP3KP Sumatera II",
+				LaunchURL:   resolvedArsiparisLaunchURL,
 			},
 		},
 	}, nil

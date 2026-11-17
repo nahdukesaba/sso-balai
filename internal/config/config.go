@@ -12,31 +12,38 @@ import (
 )
 
 type Config struct {
-	AppHost                       string
-	AppPort                       string
-	DatabaseURL                   string
-	PasswordRecoveryRedirectURL   string
-	SupabaseInviteRedirectURL     string
-	SSOBrowserEnabled             bool
-	SSOBrowserSessionKey          string
-	SSOBrowserCookieSecure        bool
-	SSOBrowserCookieSameSite      string
-	SSOBrowserSessionTTL          time.Duration
-	SSOAuthorizationCodeTTL       time.Duration
-	SSOSilapetClientID            string
-	SSOSilapetApplicationCode     string
-	SSOSilapetAccessPolicy        string
-	SSOSilapetIntrospectionSecret string
-	SSOSilapetRedirectURIs        []string
-	SSOSilapetPostLogoutURIs      []string
-	PortalSilapetLaunchURL        string
-	SSOKlinikClientID             string
-	SSOKlinikApplicationCode      string
-	SSOKlinikAccessPolicy         string
-	SSOKlinikIntrospectionSecret  string
-	SSOKlinikRedirectURIs         []string
-	SSOKlinikPostLogoutURIs       []string
-	PortalKlinikLaunchURL         string
+	AppHost                         string
+	AppPort                         string
+	DatabaseURL                     string
+	PasswordRecoveryRedirectURL     string
+	SupabaseInviteRedirectURL       string
+	SSOBrowserEnabled               bool
+	SSOBrowserSessionKey            string
+	SSOBrowserCookieSecure          bool
+	SSOBrowserCookieSameSite        string
+	SSOBrowserSessionTTL            time.Duration
+	SSOAuthorizationCodeTTL         time.Duration
+	SSOSilapetClientID              string
+	SSOSilapetApplicationCode       string
+	SSOSilapetAccessPolicy          string
+	SSOSilapetIntrospectionSecret   string
+	SSOSilapetRedirectURIs          []string
+	SSOSilapetPostLogoutURIs        []string
+	PortalSilapetLaunchURL          string
+	SSOKlinikClientID               string
+	SSOKlinikApplicationCode        string
+	SSOKlinikAccessPolicy           string
+	SSOKlinikIntrospectionSecret    string
+	SSOKlinikRedirectURIs           []string
+	SSOKlinikPostLogoutURIs         []string
+	PortalKlinikLaunchURL           string
+	SSOArsiparisClientID            string
+	SSOArsiparisApplicationCode     string
+	SSOArsiparisAccessPolicy        string
+	SSOArsiparisIntrospectionSecret string
+	SSOArsiparisRedirectURIs        []string
+	SSOArsiparisPostLogoutURIs      []string
+	PortalArsiparisLaunchURL        string
 
 	SupabaseURL       string
 	SupabasePublicKey string
@@ -63,26 +70,33 @@ func Load() (*Config, error) {
 			"SUPABASE_INVITE_REDIRECT_URL",
 			"https://sso.bp3kpsumatera2.com/accept-invite",
 		)),
-		SSOBrowserEnabled:             getEnvBool("SSO_BROWSER_ENABLED", false),
-		SSOBrowserSessionKey:          os.Getenv("SSO_BROWSER_SESSION_KEY"),
-		SSOBrowserCookieSecure:        getEnvBool("SSO_BROWSER_COOKIE_SECURE", true),
-		SSOBrowserCookieSameSite:      getEnv("SSO_BROWSER_COOKIE_SAME_SITE", "Lax"),
-		SSOBrowserSessionTTL:          getEnvDuration("SSO_BROWSER_SESSION_TTL", 8*time.Hour),
-		SSOAuthorizationCodeTTL:       getEnvDuration("SSO_AUTHORIZATION_CODE_TTL", 3*time.Minute),
-		SSOSilapetClientID:            strings.TrimSpace(getEnv("SSO_SILAPET_CLIENT_ID", "silapet-web")),
-		SSOSilapetApplicationCode:     strings.TrimSpace(getEnv("SSO_SILAPET_APPLICATION_CODE", "silapet")),
-		SSOSilapetAccessPolicy:        strings.ToUpper(strings.TrimSpace(getEnv("SSO_SILAPET_ACCESS_POLICY", "AUTO_USER"))),
-		SSOSilapetIntrospectionSecret: strings.TrimSpace(os.Getenv("SSO_SILAPET_INTROSPECTION_SECRET")),
-		SSOSilapetRedirectURIs:        splitCSV(os.Getenv("SSO_SILAPET_REDIRECT_URIS")),
-		SSOSilapetPostLogoutURIs:      splitCSV(os.Getenv("SSO_SILAPET_POST_LOGOUT_REDIRECT_URIS")),
-		PortalSilapetLaunchURL:        strings.TrimSpace(os.Getenv("PORTAL_SILAPET_LAUNCH_URL")),
-		SSOKlinikClientID:             strings.TrimSpace(getEnv("SSO_KLINIK_CLIENT_ID", "klinik-pkp-web")),
-		SSOKlinikApplicationCode:      strings.TrimSpace(getEnv("SSO_KLINIK_APPLICATION_CODE", "klinik_pkp")),
-		SSOKlinikAccessPolicy:         strings.ToUpper(strings.TrimSpace(getEnv("SSO_KLINIK_ACCESS_POLICY", "AUTO_USER"))),
-		SSOKlinikIntrospectionSecret:  strings.TrimSpace(os.Getenv("SSO_KLINIK_INTROSPECTION_SECRET")),
-		SSOKlinikRedirectURIs:         splitCSV(os.Getenv("SSO_KLINIK_REDIRECT_URIS")),
-		SSOKlinikPostLogoutURIs:       splitCSV(os.Getenv("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS")),
-		PortalKlinikLaunchURL:         strings.TrimSpace(os.Getenv("PORTAL_KLINIK_LAUNCH_URL")),
+		SSOBrowserEnabled:               getEnvBool("SSO_BROWSER_ENABLED", false),
+		SSOBrowserSessionKey:            os.Getenv("SSO_BROWSER_SESSION_KEY"),
+		SSOBrowserCookieSecure:          getEnvBool("SSO_BROWSER_COOKIE_SECURE", true),
+		SSOBrowserCookieSameSite:        getEnv("SSO_BROWSER_COOKIE_SAME_SITE", "Lax"),
+		SSOBrowserSessionTTL:            getEnvDuration("SSO_BROWSER_SESSION_TTL", 8*time.Hour),
+		SSOAuthorizationCodeTTL:         getEnvDuration("SSO_AUTHORIZATION_CODE_TTL", 3*time.Minute),
+		SSOSilapetClientID:              strings.TrimSpace(getEnv("SSO_SILAPET_CLIENT_ID", "silapet-web")),
+		SSOSilapetApplicationCode:       strings.TrimSpace(getEnv("SSO_SILAPET_APPLICATION_CODE", "silapet")),
+		SSOSilapetAccessPolicy:          strings.ToUpper(strings.TrimSpace(getEnv("SSO_SILAPET_ACCESS_POLICY", "AUTO_USER"))),
+		SSOSilapetIntrospectionSecret:   strings.TrimSpace(os.Getenv("SSO_SILAPET_INTROSPECTION_SECRET")),
+		SSOSilapetRedirectURIs:          splitCSV(os.Getenv("SSO_SILAPET_REDIRECT_URIS")),
+		SSOSilapetPostLogoutURIs:        splitCSV(os.Getenv("SSO_SILAPET_POST_LOGOUT_REDIRECT_URIS")),
+		PortalSilapetLaunchURL:          strings.TrimSpace(os.Getenv("PORTAL_SILAPET_LAUNCH_URL")),
+		SSOKlinikClientID:               strings.TrimSpace(getEnv("SSO_KLINIK_CLIENT_ID", "klinik-pkp-web")),
+		SSOKlinikApplicationCode:        strings.TrimSpace(getEnv("SSO_KLINIK_APPLICATION_CODE", "klinik_pkp")),
+		SSOKlinikAccessPolicy:           strings.ToUpper(strings.TrimSpace(getEnv("SSO_KLINIK_ACCESS_POLICY", "AUTO_USER"))),
+		SSOKlinikIntrospectionSecret:    strings.TrimSpace(os.Getenv("SSO_KLINIK_INTROSPECTION_SECRET")),
+		SSOKlinikRedirectURIs:           splitCSV(os.Getenv("SSO_KLINIK_REDIRECT_URIS")),
+		SSOKlinikPostLogoutURIs:         splitCSV(os.Getenv("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS")),
+		PortalKlinikLaunchURL:           strings.TrimSpace(os.Getenv("PORTAL_KLINIK_LAUNCH_URL")),
+		SSOArsiparisClientID:            strings.TrimSpace(getEnv("SSO_ARSIPARIS_CLIENT_ID", "arsiparis-web")),
+		SSOArsiparisApplicationCode:     strings.TrimSpace(getEnv("SSO_ARSIPARIS_APPLICATION_CODE", "arsiparis")),
+		SSOArsiparisAccessPolicy:        strings.ToUpper(strings.TrimSpace(getEnv("SSO_ARSIPARIS_ACCESS_POLICY", "AUTO_USER"))),
+		SSOArsiparisIntrospectionSecret: strings.TrimSpace(os.Getenv("SSO_ARSIPARIS_INTROSPECTION_SECRET")),
+		SSOArsiparisRedirectURIs:        splitCSV(os.Getenv("SSO_ARSIPARIS_REDIRECT_URIS")),
+		SSOArsiparisPostLogoutURIs:      splitCSV(os.Getenv("SSO_ARSIPARIS_POST_LOGOUT_REDIRECT_URIS")),
+		PortalArsiparisLaunchURL:        strings.TrimSpace(os.Getenv("PORTAL_ARSIPARIS_LAUNCH_URL")),
 
 		SupabaseURL: os.Getenv("SUPABASE_URL"),
 
@@ -132,10 +146,19 @@ func Load() (*Config, error) {
 		if err := validateSSOClientSecurity("KLINIK", cfg.SSOKlinikAccessPolicy, cfg.SSOKlinikIntrospectionSecret); err != nil {
 			return nil, err
 		}
+		if err := validateSSOClientSecurity("ARSIPARIS", cfg.SSOArsiparisAccessPolicy, cfg.SSOArsiparisIntrospectionSecret); err != nil {
+			return nil, err
+		}
 		if strings.TrimSpace(cfg.SSOKlinikClientID) == "" || strings.TrimSpace(cfg.SSOKlinikApplicationCode) == "" {
 			return nil, fmt.Errorf("Klinik browser SSO client ID and application code are required")
 		}
-		if strings.TrimSpace(cfg.SSOSilapetClientID) == strings.TrimSpace(cfg.SSOKlinikClientID) {
+		if strings.TrimSpace(cfg.SSOArsiparisClientID) == "" || strings.TrimSpace(cfg.SSOArsiparisApplicationCode) == "" {
+			return nil, fmt.Errorf("Arsiparis browser SSO client ID and application code are required")
+		}
+		silapetClientID := strings.TrimSpace(cfg.SSOSilapetClientID)
+		klinikClientID := strings.TrimSpace(cfg.SSOKlinikClientID)
+		arsiparisClientID := strings.TrimSpace(cfg.SSOArsiparisClientID)
+		if silapetClientID == klinikClientID || silapetClientID == arsiparisClientID || klinikClientID == arsiparisClientID {
 			return nil, fmt.Errorf("browser SSO client IDs must be unique")
 		}
 		if len(cfg.SSOKlinikRedirectURIs) == 0 {
@@ -143,6 +166,12 @@ func Load() (*Config, error) {
 		}
 		if len(cfg.SSOKlinikPostLogoutURIs) == 0 {
 			return nil, fmt.Errorf("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS is required when browser SSO is enabled")
+		}
+		if len(cfg.SSOArsiparisRedirectURIs) == 0 {
+			return nil, fmt.Errorf("SSO_ARSIPARIS_REDIRECT_URIS is required when browser SSO is enabled")
+		}
+		if len(cfg.SSOArsiparisPostLogoutURIs) == 0 {
+			return nil, fmt.Errorf("SSO_ARSIPARIS_POST_LOGOUT_REDIRECT_URIS is required when browser SSO is enabled")
 		}
 		if err := validateConfiguredHTTPURLs("SSO_SILAPET_REDIRECT_URIS", cfg.SSOSilapetRedirectURIs); err != nil {
 			return nil, err
@@ -156,10 +185,19 @@ func Load() (*Config, error) {
 		if err := validateConfiguredHTTPURLs("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS", cfg.SSOKlinikPostLogoutURIs); err != nil {
 			return nil, err
 		}
+		if err := validateConfiguredHTTPURLs("SSO_ARSIPARIS_REDIRECT_URIS", cfg.SSOArsiparisRedirectURIs); err != nil {
+			return nil, err
+		}
+		if err := validateConfiguredHTTPURLs("SSO_ARSIPARIS_POST_LOGOUT_REDIRECT_URIS", cfg.SSOArsiparisPostLogoutURIs); err != nil {
+			return nil, err
+		}
 		if err := validateConfiguredHTTPURLs("PORTAL_SILAPET_LAUNCH_URL", []string{cfg.PortalSilapetLaunchURL}); err != nil {
 			return nil, err
 		}
 		if err := validateConfiguredHTTPURLs("PORTAL_KLINIK_LAUNCH_URL", []string{cfg.PortalKlinikLaunchURL}); err != nil {
+			return nil, err
+		}
+		if err := validateConfiguredHTTPURLs("PORTAL_ARSIPARIS_LAUNCH_URL", []string{cfg.PortalArsiparisLaunchURL}); err != nil {
 			return nil, err
 		}
 		sameSite := strings.ToLower(strings.TrimSpace(cfg.SSOBrowserCookieSameSite))

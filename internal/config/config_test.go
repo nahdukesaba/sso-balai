@@ -34,6 +34,12 @@ func TestLoadBrowserSSOClients(t *testing.T) {
 	t.Setenv("SSO_KLINIK_REDIRECT_URIS", " http://localhost:3000/auth/sso/callback ")
 	t.Setenv("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS", " http://localhost:3000/login ")
 	t.Setenv("PORTAL_KLINIK_LAUNCH_URL", "http://klinik-pkp.test:3000/api/auth/sso/start")
+	t.Setenv("SSO_ARSIPARIS_CLIENT_ID", " arsiparis-web ")
+	t.Setenv("SSO_ARSIPARIS_APPLICATION_CODE", " arsiparis ")
+	t.Setenv("SSO_ARSIPARIS_INTROSPECTION_SECRET", "arsiparis-test-introspection-secret-01")
+	t.Setenv("SSO_ARSIPARIS_REDIRECT_URIS", " http://localhost:8083/api/auth/sso/callback ")
+	t.Setenv("SSO_ARSIPARIS_POST_LOGOUT_REDIRECT_URIS", " http://localhost:5173/login ")
+	t.Setenv("PORTAL_ARSIPARIS_LAUNCH_URL", "http://localhost:8083/api/auth/sso/start")
 
 	cfg, err := Load()
 	if err != nil {
@@ -41,10 +47,13 @@ func TestLoadBrowserSSOClients(t *testing.T) {
 	}
 	if cfg.SSOSilapetClientID != "silapet-web" || cfg.SSOSilapetApplicationCode != "silapet" ||
 		cfg.SSOKlinikClientID != "klinik-pkp-web" || cfg.SSOKlinikApplicationCode != "klinik_pkp" ||
+		cfg.SSOArsiparisClientID != "arsiparis-web" || cfg.SSOArsiparisApplicationCode != "arsiparis" ||
 		len(cfg.SSOSilapetRedirectURIs) != 1 || cfg.SSOSilapetRedirectURIs[0] != "http://localhost:8081/auth/sso/callback" ||
 		len(cfg.SSOKlinikRedirectURIs) != 1 || cfg.SSOKlinikRedirectURIs[0] != "http://localhost:3000/auth/sso/callback" ||
+		len(cfg.SSOArsiparisRedirectURIs) != 1 || cfg.SSOArsiparisRedirectURIs[0] != "http://localhost:8083/api/auth/sso/callback" ||
 		cfg.PortalSilapetLaunchURL != "http://silapet.test:8081/api/auth/sso/start" ||
-		cfg.PortalKlinikLaunchURL != "http://klinik-pkp.test:3000/api/auth/sso/start" {
+		cfg.PortalKlinikLaunchURL != "http://klinik-pkp.test:3000/api/auth/sso/start" ||
+		cfg.PortalArsiparisLaunchURL != "http://localhost:8083/api/auth/sso/start" {
 		t.Fatal("browser SSO clients were not loaded correctly")
 	}
 }

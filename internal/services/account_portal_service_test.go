@@ -72,6 +72,50 @@ func TestAccountPortalRejectsUnsafeLaunchConfiguration(t *testing.T) {
 		); err == nil {
 			t.Fatalf("unsafe Klinik launch URL accepted: %q", launchURL)
 		}
+		if _, err := NewAccountPortalService(
+			browser, &fakeAccountPortalApplications{}, "http://localhost:8081/", "http://localhost:3000/", launchURL,
+		); err == nil {
+			t.Fatalf("unsafe Arsiparis launch URL accepted: %q", launchURL)
+		}
+	}
+}
+
+func TestAccountPortalArsiparisMetadataAndLaunch(t *testing.T) {
+	browser, store, _, _, _, _ := newBrowserSSOTestService(t)
+	store.session = &models.BrowserSSOSession{
+		TokenHash: hashOpaqueToken("portal-cookie"), AuthUserID: "auth-user-id", AppUserID: "app-user-id",
+	}
+	applications := &fakeAccountPortalApplications{applications: []models.PortalApplicationAccess{
+		{
+			Code: models.ApplicationCodeArsiparis, Name: "Untrusted label", Role: "admin",
+			Status: models.MembershipStatusApproved, HasMembership: true,
+		},
+	}}
+	portal, err := NewAccountPortalService(
+		browser,
+		applications,
+		"http://silapet.test:8081/api/auth/sso/start",
+		"http://klinik-pkp.test:3000/api/auth/sso/start",
+		"http://localhost:8083/api/auth/sso/start",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := portal.View(context.Background(), "portal-cookie", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Applications) != 1 {
+		t.Fatalf("unexpected applications: %#v", view.Applications)
+	}
+	card := view.Applications[0]
+	if card.Name != "Arsiparis" || !card.Launchable || card.LaunchURL != "/portal/launch?app=arsiparis" {
+		t.Fatalf("unexpected Arsiparis card: %#v", card)
+	}
+	launchTarget, err := portal.Launch(context.Background(), "portal-cookie", "arsiparis")
+	if err != nil || launchTarget != "http://localhost:8083/api/auth/sso/start" {
+		t.Fatalf("unexpected Arsiparis launch target: target=%q err=%v", launchTarget, err)
 	}
 }
 
