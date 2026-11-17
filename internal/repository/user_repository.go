@@ -27,8 +27,6 @@ const userColumns = `
 	auth_user_id,
 	email,
 	full_name,
-	role,
-	status,
 	phone,
 	created_at,
 	updated_at,
@@ -43,8 +41,6 @@ func scanUser(row pgx.Row) (*models.AppUser, error) {
 		&user.AuthUserID,
 		&user.Email,
 		&user.FullName,
-		&user.Role,
-		&user.Status,
 		&user.Phone,
 		&user.CreatedAt,
 		&user.UpdatedAt,
@@ -227,17 +223,13 @@ func (r *UserRepository) CreateBootstrapUser(
 		INSERT INTO public.app_users (
 			id,
 			email,
-			full_name,
-			role,
-			status
+			full_name
 		)
-		VALUES ($1, $2, $3, $4, $5)
+		VALUES ($1, $2, $3)
 		RETURNING `+userColumns,
 		id,
 		email,
 		fullName,
-		role,
-		models.UserStatusApproved,
 	)
 
 	user, err := scanUser(row)
@@ -263,17 +255,13 @@ func (r *UserRepository) CreateMigratedUser(
 		INSERT INTO public.app_users (
 			id,
 			email,
-			full_name,
-			role,
-			status
+			full_name
 		)
-		VALUES ($1, $2, $3, $4, $5)
+		VALUES ($1, $2, $3)
 		RETURNING `+userColumns,
 		id,
 		email,
 		fullName,
-		"user",
-		models.UserStatusApproved,
 	)
 
 	user, err := scanUser(row)
@@ -288,10 +276,7 @@ func (r *UserRepository) CreateMigratedUser(
 }
 
 // CreateCentralUser creates the central profile that corresponds to a
-// Supabase Auth identity.
-//
-// role/status are compatibility values for the legacy app_users schema only.
-// Application authorization must come from app_memberships.
+// Supabase Auth identity. Application authorization must come from app_memberships.
 func (r *UserRepository) CreateCentralUser(
 	ctx context.Context,
 	id string,
@@ -306,17 +291,13 @@ func (r *UserRepository) CreateCentralUser(
 			id,
 			email,
 			full_name,
-			role,
-			status,
 			phone
 		)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES ($1, $2, $3, $4)
 		RETURNING `+userColumns,
 		id,
 		email,
 		fullName,
-		"user",
-		models.UserStatusPending,
 		phone,
 	)
 

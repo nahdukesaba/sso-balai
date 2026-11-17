@@ -73,11 +73,11 @@ FOR UPDATE
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = tx.QueryRow(ctx, `
 INSERT INTO public.app_users (
-    id, auth_user_id, email, full_name, role, status, phone
+    id, auth_user_id, email, full_name, phone
 )
-VALUES (gen_random_uuid(), $1, $2, $3, 'user', $4, $5)
+VALUES (gen_random_uuid(), $1, $2, $3, $4)
 RETURNING id
-`, authUserID, email, fullName, models.UserStatusApproved, phone).Scan(&appUserID)
+`, authUserID, email, fullName, phone).Scan(&appUserID)
 		if err != nil {
 			return nil, mapKlinikProvisioningError("create canonical Klinik user", err)
 		}

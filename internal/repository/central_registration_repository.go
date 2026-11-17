@@ -89,8 +89,6 @@ func (r *CentralRegistrationRepository) CreateNewSupabaseIdentity(
 			auth_user_id,
 			email,
 			full_name,
-			role,
-			status,
 			phone
 		)
 		VALUES (
@@ -98,16 +96,12 @@ func (r *CentralRegistrationRepository) CreateNewSupabaseIdentity(
 			$1,
 			$2,
 			$3,
-			$4,
-			$5,
-			$6
+			$4
 		)
 		RETURNING `+userColumns,
 		authUserID,
 		email,
 		fullName,
-		userRole,
-		userStatus,
 		phone,
 	)
 

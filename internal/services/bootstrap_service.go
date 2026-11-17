@@ -191,21 +191,6 @@ func (s *BootstrapService) handleExistingAuthUser(
 		)
 	}
 
-	// Do not silently elevate or reactivate an existing user.
-	if appUserByID.Status != models.UserStatusApproved {
-		return nil, fmt.Errorf(
-			"%w: existing bootstrap account is not approved",
-			ErrBootstrapConflict,
-		)
-	}
-
-	if appUserByID.Role != role {
-		return nil, fmt.Errorf(
-			"%w: existing bootstrap account role differs",
-			ErrBootstrapConflict,
-		)
-	}
-
 	// Everything already exists in the expected state.
 	return &BootstrapResult{
 		Action: "already_exists",
