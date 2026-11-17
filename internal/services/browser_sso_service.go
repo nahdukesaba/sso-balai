@@ -26,6 +26,7 @@ var (
 	ErrInvalidAuthorizationCode = errors.New("invalid browser SSO authorization code")
 	ErrInvalidPKCEVerifier      = errors.New("invalid PKCE verifier")
 	ErrInvalidClient            = errors.New("invalid browser SSO client credentials")
+	ErrSignupNotAllowed         = errors.New("application does not accept self-service signup")
 )
 
 const (
@@ -387,6 +388,21 @@ func (s *BrowserSSOService) PendingAuthorization(value string) (string, error) {
 	client, ok := s.clients[request.ClientID]
 	if !ok {
 		return "", ErrInvalidAuthorizeRequest
+	}
+	return client.applicationCode, nil
+}
+
+// SignupApplication returns the application of a pending authorization request
+// when its client accepts self-service access requests (AUTO_USER). The new
+// membership starts pending until an admin approves it.
+func (s *BrowserSSOService) SignupApplication(sealed string) (string, error) {
+	request, err := s.OpenAuthorizeRequest(sealed)
+	if err != nil {
+		return "", err
+	}
+	client := s.clients[request.ClientID]
+	if client.accessPolicy != ApplicationAccessAutoUser {
+		return "", ErrSignupNotAllowed
 	}
 	return client.applicationCode, nil
 }

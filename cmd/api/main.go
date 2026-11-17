@@ -254,6 +254,10 @@ func main() {
 		cfg.SSOBrowserSessionTTL,
 	)
 	browserSSOHandler.SetAccountPortalService(accountPortalService)
+	browserSSOHandler.SetRegistrationService(registrationService)
+	browserSSOHandler.SetMembershipAdminService(
+		services.NewMembershipAdminService(repository.NewMembershipAdminRepository(db)),
+	)
 	var oidcProvider *services.OIDCProvider
 	if cfg.OIDCIssuer != "" {
 		signingKey, keyErr := os.ReadFile(cfg.OIDCSigningKeyFile)

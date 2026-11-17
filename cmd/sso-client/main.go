@@ -30,7 +30,7 @@ func main() {
 	redirectURIs := flag.String("redirect-uris", "", "comma-separated exact callback URLs (required)")
 	postLogoutURIs := flag.String("post-logout-uris", "", "comma-separated exact post-logout URLs (required)")
 	accessPolicy := flag.String("access-policy", services.ApplicationAccessRestricted,
-		"AUTO_USER (first login auto-enrolls as user) or RESTRICTED (admin must grant access)")
+		"AUTO_USER (users may sign up or request access; an admin approves) or RESTRICTED (invite/provisioning only)")
 	secretEnv := flag.String("secret-env", "SSO_CLIENT_SECRET", "environment variable holding the introspection secret (min 32 chars)")
 	flag.Parse()
 

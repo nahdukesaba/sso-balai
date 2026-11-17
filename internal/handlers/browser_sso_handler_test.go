@@ -153,6 +153,7 @@ func newHandlerBrowserSSOTestSetup(
 				{
 					ClientID:                "klinik-pkp-web",
 					ApplicationCode:         "klinik_pkp",
+					AccessPolicy:            services.ApplicationAccessAutoUser,
 					ApplicationName:         "Klinik PKP",
 					Description:             "Portal layanan informasi, konsultasi, dan pendampingan teknis perumahan serta permukiman BP3KP Sumatera II",
 					LaunchURL:               "http://klinik-pkp.test:3000/api/auth/sso/start",

@@ -149,14 +149,14 @@ Menambah sistem baru tidak perlu mengubah kode. Simpan secret-nya di `.env` (mis
 
 ```powershell
 go run ./cmd/sso-client `
-  -client-id eoffice-web -app eoffice -name "E-Office" -access-policy RESTRICTED `
+  -client-id eoffice-web -app eoffice -name "E-Office" -access-policy AUTO_USER `
   -redirect-uris https://eoffice.example/auth/sso/callback `
   -post-logout-uris https://eoffice.example/login `
   -launch-url https://eoffice.example/api/auth/sso/start `
   -secret-env SSO_EOFFICE_INTROSPECTION_SECRET
 ```
 
-Perintah dengan `-client-id` yang sudah ada akan memperbarui datanya. Hanya hash SHA-256 secret yang disimpan. Restart API setelah mendaftarkan atau mengubah aplikasi. `AUTO_USER` otomatis memberi akses `user` saat login pertama; `RESTRICTED` menunggu admin memberi akses.
+Perintah dengan `-client-id` yang sudah ada akan memperbarui datanya. Hanya hash SHA-256 secret yang disimpan. Restart API setelah mendaftarkan atau mengubah aplikasi. `AUTO_USER`: pengguna boleh mendaftar atau meminta akses sendiri, lalu status `pending` sampai admin menyetujui. `RESTRICTED`: tidak ada pendaftaran mandiri; akses hanya lewat undangan/provisioning admin.
 
 #### Aktifkan OpenID Connect (opsional, disarankan untuk aplikasi baru)
 
@@ -284,6 +284,24 @@ Contoh URL lokal sudah tersedia pada `.env.example`. Sesuaikan port jika aplikas
 | Autentikasi client | `client_secret_basic` atau `client_secret_post` |
 
 `id_token` berisi `sub` (ID pengguna Central), `email`, `name`, `sid` (sesi Central), dan `app_role` (role pengguna di aplikasi tersebut). Untuk logout, arahkan ke `end_session_endpoint` (`/logout`) dengan `post_logout_redirect_uri` dan `id_token_hint` atau `client_id`. Untuk mengecek apakah sesi Central masih aktif, panggil `userinfo_endpoint` dengan access token; logout Central langsung membuatnya ditolak.
+
+### Pendaftaran dan persetujuan akses
+
+sso-balai adalah satu-satunya tempat login dan daftar. Aplikasi tidak lagi punya form password sendiri.
+
+1. Tombol **Masuk** di aplikasi mengarah ke `/authorize` seperti biasa.
+2. Tombol **Daftar** di aplikasi mengarah ke `/authorize` yang sama ditambah `prompt=create`. sso-balai langsung membuka form daftar (`/account/register`). Form login juga menampilkan tautan "Belum punya akun? Daftar".
+3. Pendaftaran membuat Akun Balai dan permintaan akses `pending` untuk aplikasi itu, lalu kembali ke aplikasi dengan `status=pending`. Aplikasi cukup menampilkan "Menunggu persetujuan admin".
+4. Admin membuka `/admin` (tombol **Kelola Akses** di portal) untuk menyetujui, menolak, mengganti role (`user`/`admin`), atau menonaktifkan akses. Setiap perubahan dicatat di `app_audit_events`.
+5. Setelah disetujui, login berikutnya langsung masuk ke aplikasi.
+
+Siapa yang bisa membuka `/admin`:
+
+- Admin Central (`app_users.role = 'admin'`, misalnya akun bootstrap) mengelola semua aplikasi.
+- Admin aplikasi (membership `role = admin` dan `approved`) hanya mengelola aplikasinya sendiri.
+- Tidak ada admin yang bisa mengubah akses miliknya sendiri.
+
+Pendaftaran hanya tersedia untuk aplikasi dengan `-access-policy AUTO_USER`. Akun yang mendaftar sendiri belum memverifikasi kepemilikan email, jadi admin perlu memastikan pemohon sebelum menyetujui.
 
 ### Urutan menjalankan seluruh stack
 

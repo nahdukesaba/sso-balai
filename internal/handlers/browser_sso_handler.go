@@ -25,6 +25,8 @@ type BrowserSSOHandler struct {
 	service        *services.BrowserSSOService
 	portalService  *services.AccountPortalService
 	oidc           *services.OIDCProvider
+	registration   services.RegistrationService
+	admin          *services.MembershipAdminService
 	cookieSecure   bool
 	cookieSameSite string
 	sessionTTL     time.Duration
@@ -81,6 +83,10 @@ func (h *BrowserSSOHandler) Authorize(c *fiber.Ctx) error {
 		return browserSSOError(c, fiber.StatusUnauthorized, "authorization_failed", "SSO authorization could not be completed.")
 	}
 	if result.LoginRequired {
+		// OIDC prompt=create: the app's "Daftar" button opens signup directly.
+		if c.Query("prompt") == "create" && h.signupURL(sealed) != "" {
+			return c.Redirect(h.signupURL(sealed), fiber.StatusFound)
+		}
 		return c.Redirect("/account/login?request="+url.QueryEscape(sealed), fiber.StatusFound)
 	}
 	redirect, err := url.Parse(result.RedirectURI)

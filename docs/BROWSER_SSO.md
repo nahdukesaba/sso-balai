@@ -72,6 +72,27 @@ Missing, expired, or revoked Central sessions receive an already-logged-out
 state or return to the exact registered URI. Direct Central cancel uses the
 existing `/logout?cancelled=1` state; portal cancel returns to `/`.
 
+## Signup and access approval
+
+Central is the only place to sign in or sign up. Access policy per client:
+
+- `AUTO_USER`: users may self-register at `GET/POST /account/register`
+  (reached from the login form or with `prompt=create` on `/authorize`) and
+  first logins request access. Both create a `pending` membership; the app
+  receives `status=pending` until an admin approves.
+- `RESTRICTED`: no self-service; access only through invitation/provisioning.
+
+`GET /admin` lists memberships of the applications the signed-in user manages,
+pending first. Central admins (`app_users.role = 'admin'`) manage every active
+application; approved application admins manage only their application. The
+actor's own membership is never changeable. `POST /admin/memberships` (double
+submit CSRF) sets role (`user`/`admin`) and status (`approved`, `rejected`,
+`disabled`); scope is re-checked in the same SQL transaction that updates the
+row and appends an `app_audit_events` record (`entity_kind = 'membership'`).
+
+Self-registered accounts are created with a confirmed email (no ownership
+check); approval is the gate, so admins should verify the requester.
+
 ## OpenID Connect
 
 When `SSO_OIDC_ISSUER` and `SSO_OIDC_SIGNING_KEY_FILE` are set, Central is a

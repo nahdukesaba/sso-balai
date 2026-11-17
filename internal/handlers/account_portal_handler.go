@@ -25,6 +25,9 @@ func (h *BrowserSSOHandler) PortalHome(c *fiber.Ctx) error {
 		return browserSSOError(c, fiber.StatusServiceUnavailable, "portal_unavailable", "Account portal is unavailable.")
 	}
 	setBrowserSSOPageHeaders(c, "'self'")
+	if h.admin != nil && view.Identity != nil && view.Identity.User != nil {
+		view.CanManageAccess, _ = h.admin.CanManage(c.UserContext(), view.Identity.User.ID)
+	}
 	if view.Identity == nil || view.Identity.User == nil {
 		return renderAccountPortalLoggedOut(c, view)
 	}
@@ -76,7 +79,7 @@ func (h *BrowserSSOHandler) PortalLoginPage(c *fiber.Ctx) error {
 		return browserSSOError(c, fiber.StatusInternalServerError, "portal_unavailable", "Account portal is unavailable.")
 	}
 	h.setCookie(c, accountPortalLoginCSRF, csrf, 600, time.Time{})
-	return renderAccountPortalLogin(c, csrf, pendingRequest, "", formAction, pendingAppName(view))
+	return renderAccountPortalLogin(c, csrf, pendingRequest, "", formAction, pendingAppName(view), h.signupURL(pendingRequest))
 }
 
 func (h *BrowserSSOHandler) PortalLoginSubmit(c *fiber.Ctx) error {
@@ -101,7 +104,7 @@ func (h *BrowserSSOHandler) PortalLoginSubmit(c *fiber.Ctx) error {
 	if err != nil {
 		// An empty browser token resolves no identity, so View only labels the pending app.
 		view, _ := h.portalService.View(c.UserContext(), "", pendingRequest)
-		return renderAccountPortalLogin(c, csrf, pendingRequest, "Email atau password tidak valid.", formAction, pendingAppName(view))
+		return renderAccountPortalLogin(c, csrf, pendingRequest, "Email atau password tidak valid.", formAction, pendingAppName(view), h.signupURL(pendingRequest))
 	}
 	h.setSessionCookie(c, rawToken, expiresAt)
 	h.clearCookie(c, accountPortalLoginCSRF)
@@ -157,15 +160,16 @@ func renderAccountPortalLoggedIn(c *fiber.Ctx, view *models.AccountPortalView) e
 	return c.SendString(output.String())
 }
 
-func renderAccountPortalLogin(c *fiber.Ctx, csrf, request, message, formAction, appName string) error {
+func renderAccountPortalLogin(c *fiber.Ctx, csrf, request, message, formAction, appName, signupURL string) error {
 	setBrowserSSOPageHeaders(c, formAction)
 	var output strings.Builder
 	if err := accountPortalLoginTemplate.Execute(&output, struct {
-		CSRF    string
-		Request string
-		Message string
-		AppName string
-	}{csrf, request, message, appName}); err != nil {
+		CSRF      string
+		Request   string
+		Message   string
+		AppName   string
+		SignupURL string
+	}{csrf, request, message, appName, signupURL}); err != nil {
 		return err
 	}
 	return c.SendString(output.String())
@@ -175,6 +179,6 @@ const accountPortalStyles = `:root{font-family:Inter,ui-sans-serif,system-ui,san
 
 var accountPortalLoggedOutTemplate = template.Must(template.New("account-portal-logged-out").Parse(`<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Akun Balai Pegawai - BP3KP Sumatera II</title><style>` + accountPortalStyles + `</style></head><body><main><header class="brand"><div class="brand-mark" aria-hidden="true">BP3KP</div><div><div class="brand-name">BP3KP Sumatera II</div><div class="brand-unit">Akun Balai Pegawai</div></div></header><section class="panel"><p class="muted">Portal Layanan Internal Balai PK3P Sumatera II</p><h1>Akun Balai Pegawai</h1>{{if .PendingAuthorization}}<p class="status">{{.PendingAuthorization.ApplicationName}}</p>{{end}}<div class="actions"><a class="button" href="{{if .PendingAuthorization}}{{.PendingAuthorization.LoginURL}}{{else}}/account/login{{end}}">Masuk</a><a class="button secondary" href="/forgot-password">Lupa Password</a></div></section></main></body></html>`))
 
-var accountPortalLoggedInTemplate = template.Must(template.New("account-portal").Parse(`<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Akun Balai Pegawai - BP3KP Sumatera II</title><style>` + accountPortalStyles + `</style></head><body><main><header class="brand"><div class="brand-mark" aria-hidden="true">BP3KP</div><div><div class="brand-name">BP3KP Sumatera II</div><div class="brand-unit">Akun Balai Pegawai</div></div></header><section class="panel"><div class="identity"><div><h1>Halo, {{.Identity.User.FullName}}</h1></div><a class="button secondary" href="/logout?portal=1">Keluar</a></div>{{if .PendingAuthorization}}<div class="spacer"><a class="button" href="{{.PendingAuthorization.ContinueURL}}">Lanjut ke {{.PendingAuthorization.ApplicationName}}</a></div>{{end}}<div class="spacer"><h2>Aplikasi Anda</h2><div class="apps">{{range .Applications}}<article class="card"><h2>{{.Name}}</h2>{{if .Description}}<p class="muted">{{.Description}}</p>{{end}}<p class="status">{{.StatusLabel}}</p>{{if .RoleLabel}}<p class="role">{{.RoleLabel}}</p>{{end}}{{if .Launchable}}<a class="button" href="{{.LaunchURL}}">Buka Aplikasi</a>{{end}}</article>{{else}}<p class="muted">Tidak Ada Aplikasi Yang Tersedia</p>{{end}}</div></div></section></main></body></html>`))
+var accountPortalLoggedInTemplate = template.Must(template.New("account-portal").Parse(`<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Akun Balai Pegawai - BP3KP Sumatera II</title><style>` + accountPortalStyles + `</style></head><body><main><header class="brand"><div class="brand-mark" aria-hidden="true">BP3KP</div><div><div class="brand-name">BP3KP Sumatera II</div><div class="brand-unit">Akun Balai Pegawai</div></div></header><section class="panel"><div class="identity"><div><h1>Halo, {{.Identity.User.FullName}}</h1></div><div class="actions" style="margin-top:0">{{if .CanManageAccess}}<a class="button secondary" href="/admin">Kelola Akses</a>{{end}}<a class="button secondary" href="/logout?portal=1">Keluar</a></div></div>{{if .PendingAuthorization}}<div class="spacer"><a class="button" href="{{.PendingAuthorization.ContinueURL}}">Lanjut ke {{.PendingAuthorization.ApplicationName}}</a></div>{{end}}<div class="spacer"><h2>Aplikasi Anda</h2><div class="apps">{{range .Applications}}<article class="card"><h2>{{.Name}}</h2>{{if .Description}}<p class="muted">{{.Description}}</p>{{end}}<p class="status">{{.StatusLabel}}</p>{{if .RoleLabel}}<p class="role">{{.RoleLabel}}</p>{{end}}{{if .Launchable}}<a class="button" href="{{.LaunchURL}}">Buka Aplikasi</a>{{end}}</article>{{else}}<p class="muted">Tidak Ada Aplikasi Yang Tersedia</p>{{end}}</div></div></section></main></body></html>`))
 
-var accountPortalLoginTemplate = template.Must(template.New("account-portal-login").Parse(`<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Masuk - Akun Balai Pegawai</title><style>` + accountPortalStyles + `</style></head><body><main><header class="brand"><div class="brand-mark" aria-hidden="true">BP3KP</div><div><div class="brand-name">BP3KP Sumatera II</div><div class="brand-unit">Akun Balai Pegawai</div></div></header><section class="panel" style="max-width:30rem;margin:0 auto"><h1>Masuk</h1>{{if .AppName}}<p class="status">Lanjut ke {{.AppName}}</p>{{end}}<p class="lead">Gunakan Email & Password Akun Balai Anda</p>{{if .Message}}<p class="error" role="alert">{{.Message}}</p>{{end}}<form method="post" action="/account/login"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="request" value="{{.Request}}"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" required><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required><button class="button" type="submit" style="width:100%;margin-top:1.25rem">Masuk</button></form><p><a class="footer-link" href="/forgot-password">Lupa Password?</a></p></section></main></body></html>`))
+var accountPortalLoginTemplate = template.Must(template.New("account-portal-login").Parse(`<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Masuk - Akun Balai Pegawai</title><style>` + accountPortalStyles + `</style></head><body><main><header class="brand"><div class="brand-mark" aria-hidden="true">BP3KP</div><div><div class="brand-name">BP3KP Sumatera II</div><div class="brand-unit">Akun Balai Pegawai</div></div></header><section class="panel" style="max-width:30rem;margin:0 auto"><h1>Masuk</h1>{{if .AppName}}<p class="status">Lanjut ke {{.AppName}}</p>{{end}}<p class="lead">Gunakan Email & Password Akun Balai Anda</p>{{if .Message}}<p class="error" role="alert">{{.Message}}</p>{{end}}<form method="post" action="/account/login"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="request" value="{{.Request}}"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" required><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required><button class="button" type="submit" style="width:100%;margin-top:1.25rem">Masuk</button></form><p><a class="footer-link" href="/forgot-password">Lupa Password?</a></p>{{if .SignupURL}}<p><a class="footer-link" href="{{.SignupURL}}">Belum punya akun? Daftar</a></p>{{end}}</section></main></body></html>`))

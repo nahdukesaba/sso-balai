@@ -101,6 +101,7 @@ func (p *OIDCProvider) Discovery() map[string]any {
 		"scopes_supported":                      []string{"openid", "profile", "email"},
 		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post"},
 		"code_challenge_methods_supported":      []string{"S256"},
+		"prompt_values_supported":               []string{"create"},
 		"claims_supported": []string{
 			"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "sid",
 			"email", "email_verified", "name", "preferred_username", "app_role",

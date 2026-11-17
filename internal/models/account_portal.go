@@ -22,6 +22,7 @@ type AccountPortalView struct {
 	Identity             *Identity
 	Applications         []PortalApplicationCard
 	PendingAuthorization *PortalPendingAuthorization
+	CanManageAccess      bool
 }
 
 type PortalPendingAuthorization struct {
