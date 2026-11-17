@@ -158,6 +158,23 @@ go run ./cmd/sso-client `
 
 Perintah dengan `-client-id` yang sudah ada akan memperbarui datanya. Hanya hash SHA-256 secret yang disimpan. Restart API setelah mendaftarkan atau mengubah aplikasi. `AUTO_USER` otomatis memberi akses `user` saat login pertama; `RESTRICTED` menunggu admin memberi akses.
 
+#### Aktifkan OpenID Connect (opsional, disarankan untuk aplikasi baru)
+
+Dengan OIDC, aplikasi baru cukup memakai library "Generic OpenID Connect" (Auth.js, Laravel Socialite, Spring Security, `coreos/go-oidc`, dan lain-lain), sama seperti memasang "Login with Google". Buat kunci tanda tangan RSA sekali (Git Bash menyediakan `openssl`):
+
+```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out oidc-signing-key.pem
+```
+
+Lalu isi `.env`:
+
+```dotenv
+SSO_OIDC_ISSUER=http://sso-balai.test:18082
+SSO_OIDC_SIGNING_KEY_FILE=oidc-signing-key.pem
+```
+
+`*.pem` sudah diabaikan Git. Jangan pernah membagikan file ini; aplikasi hanya membutuhkan kunci publik yang tersedia di `/.well-known/jwks.json`. Mengganti kunci membuat token lama tidak bisa diverifikasi, jadi lakukan hanya saat perlu.
+
 ### 6. Buat akun bootstrap bila diperlukan
 
 Untuk database baru, isi sementara bagian berikut pada `.env`:
@@ -250,6 +267,23 @@ Aturan penting:
 - Setelah mendaftarkan ulang aplikasi atau mengubah `.env`, restart service terkait.
 
 Contoh URL lokal sudah tersedia pada `.env.example`. Sesuaikan port jika aplikasi mentor berjalan pada port berbeda, tetapi ubah kedua sisi secara bersamaan.
+
+### Menghubungkan aplikasi baru lewat OIDC
+
+1. Daftarkan aplikasi dengan `go run ./cmd/sso-client` (lihat bagian registrasi di atas).
+2. Di aplikasi, buat provider OIDC generik dengan nilai berikut:
+
+| Pengaturan di aplikasi | Nilai |
+| --- | --- |
+| Issuer / discovery URL | `SSO_OIDC_ISSUER` (discovery: `<issuer>/.well-known/openid-configuration`) |
+| Client ID | `-client-id` yang didaftarkan |
+| Client secret | Secret yang ditunjuk `-secret-env` |
+| Redirect URI | Salah satu `-redirect-uris` |
+| Scope | `openid email profile` |
+| PKCE | Wajib, metode `S256` |
+| Autentikasi client | `client_secret_basic` atau `client_secret_post` |
+
+`id_token` berisi `sub` (ID pengguna Central), `email`, `name`, `sid` (sesi Central), dan `app_role` (role pengguna di aplikasi tersebut). Untuk logout, arahkan ke `end_session_endpoint` (`/logout`) dengan `post_logout_redirect_uri` dan `id_token_hint` atau `client_id`. Untuk mengecek apakah sesi Central masih aktif, panggil `userinfo_endpoint` dengan access token; logout Central langsung membuatnya ditolak.
 
 ### Urutan menjalankan seluruh stack
 

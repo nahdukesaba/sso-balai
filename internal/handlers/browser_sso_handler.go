@@ -24,6 +24,7 @@ const (
 type BrowserSSOHandler struct {
 	service        *services.BrowserSSOService
 	portalService  *services.AccountPortalService
+	oidc           *services.OIDCProvider
 	cookieSecure   bool
 	cookieSameSite string
 	sessionTTL     time.Duration
@@ -32,6 +33,13 @@ type BrowserSSOHandler struct {
 func (h *BrowserSSOHandler) SetAccountPortalService(service *services.AccountPortalService) {
 	if h != nil {
 		h.portalService = service
+	}
+}
+
+// SetOIDCProvider lets /logout accept the OIDC id_token_hint in place of client_id.
+func (h *BrowserSSOHandler) SetOIDCProvider(provider *services.OIDCProvider) {
+	if h != nil {
+		h.oidc = provider
 	}
 }
 
@@ -107,6 +115,7 @@ func (h *BrowserSSOHandler) authorizeRequest(c *fiber.Ctx) (models.BrowserSSOAut
 		ResponseType: c.Query("response_type"), State: c.Query("state"),
 		CodeChallenge:       c.Query("code_challenge"),
 		CodeChallengeMethod: c.Query("code_challenge_method"),
+		Scope:               c.Query("scope"), Nonce: c.Query("nonce"),
 	}
 	sealed, err := h.service.SealAuthorizeRequest(request)
 	return request, sealed, err
@@ -117,6 +126,9 @@ func (h *BrowserSSOHandler) LogoutPage(c *fiber.Ctx) error {
 		return browserSSOError(c, fiber.StatusServiceUnavailable, "sso_unavailable", "Logout is unavailable.")
 	}
 	clientID := strings.TrimSpace(c.Query("client_id"))
+	if clientID == "" && h.oidc != nil {
+		clientID = h.oidc.ClientIDFromIDTokenHint(c.Query("id_token_hint"))
+	}
 	redirectURI := strings.TrimSpace(c.Query("post_logout_redirect_uri"))
 	cancelReturn := strings.TrimSpace(c.Query("cancel_return"))
 	if cancelReturn == "" {

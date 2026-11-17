@@ -72,6 +72,38 @@ Missing, expired, or revoked Central sessions receive an already-logged-out
 state or return to the exact registered URI. Direct Central cancel uses the
 existing `/logout?cancelled=1` state; portal cancel returns to `/`.
 
+## OpenID Connect
+
+When `SSO_OIDC_ISSUER` and `SSO_OIDC_SIGNING_KEY_FILE` are set, Central is a
+standard OpenID Connect provider on top of the same browser session, client
+registry and membership checks:
+
+| Endpoint | Path |
+| --- | --- |
+| Discovery | `GET /.well-known/openid-configuration` |
+| JWKS | `GET /.well-known/jwks.json` |
+| Authorization | `GET /authorize` (adds `scope` and `nonce`) |
+| Token | `POST /oauth/token` |
+| UserInfo | `GET/POST /oauth/userinfo` |
+| End session | `GET /logout` (accepts `id_token_hint` in place of `client_id`) |
+
+- Only `response_type=code` with PKCE `S256` is accepted (OAuth 2.1). The
+  token endpoint also requires client authentication (`client_secret_basic`
+  or `client_secret_post`); the client secret is the client's registered
+  introspection secret.
+- Tokens are RS256 JWTs signed with the configured key (`kid` is a thumbprint
+  of the public key) and live 15 minutes. `id_token` is returned only when
+  `scope` contains `openid`; `email`/`email_verified` need `email`, and
+  `name`/`preferred_username` need `profile`. `sub` is the Central app user ID,
+  `sid` the Central browser session ID, `app_role` the membership role.
+- Codes are redeemed once and re-check the browser session, user and approved
+  membership before tokens are issued. UserInfo repeats those checks, so a
+  Central logout or revoked membership is visible immediately.
+- The legacy `POST /api/v1/auth/sso/exchange` and `/introspect` endpoints keep
+  working for SILAPET and Klinik.
+- Not implemented: refresh tokens, `prompt`/`max_age`, `state` passthrough on
+  logout, and front/back-channel logout notifications.
+
 ## Configuration
 
 - `SSO_BROWSER_ENABLED`
@@ -80,8 +112,10 @@ existing `/logout?cancelled=1` state; portal cancel returns to `/`.
 - `SSO_BROWSER_COOKIE_SAME_SITE`
 - `SSO_BROWSER_SESSION_TTL`
 - `SSO_AUTHORIZATION_CODE_TTL`
+- `SSO_OIDC_ISSUER` (optional; public base URL, no trailing slash)
+- `SSO_OIDC_SIGNING_KEY_FILE` (optional; path to an RSA 2048+ PEM private key)
 
 Per-application values are rows in `public.sso_clients`, not environment
 variables.
 
-The feature is fail-closed and disabled by default. The local portal is available at `http://sso-balai.test:18082/`. The existing stack already has the Browser SSO schema. The portal launch and logout sequencing fixes add no migration. Migration `000007` adds `public.sso_clients`; register each client before restarting with Browser SSO enabled.
+The feature is fail-closed and disabled by default. The local portal is available at `http://sso-balai.test:18082/`. The existing stack already has the Browser SSO schema. The portal launch and logout sequencing fixes add no migration. Migration `000007` adds `public.sso_clients` and `000008` adds the OIDC `nonce`/`scope` code columns; register each client before restarting with Browser SSO enabled.

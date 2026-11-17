@@ -94,10 +94,10 @@ func (r *BrowserSSORepository) CreateAuthorizationCode(
 	_, err := r.pool.Exec(ctx, `
 INSERT INTO public.sso_authorization_codes (
     code_hash, browser_session_id, client_id, auth_user_id, app_user_id,
-    redirect_uri, code_challenge, expires_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    redirect_uri, code_challenge, nonce, scope, expires_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `, code.CodeHash, code.BrowserSessionID, code.ClientID, code.AuthUserID,
-		code.AppUserID, code.RedirectURI, code.CodeChallenge, code.ExpiresAt)
+		code.AppUserID, code.RedirectURI, code.CodeChallenge, code.Nonce, code.Scope, code.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("create browser SSO authorization code: %w", err)
 	}
@@ -121,14 +121,14 @@ WHERE code_hash = $1
   AND used_at IS NULL
   AND expires_at > now()
 RETURNING code_hash, browser_session_id, client_id, auth_user_id, app_user_id,
-          redirect_uri, code_challenge, expires_at, used_at, created_at
+          redirect_uri, code_challenge, nonce, scope, expires_at, used_at, created_at
 `, codeHash, clientID, redirectURI, codeChallenge)
 
 	var code models.BrowserSSOAuthorizationCode
 	if err := row.Scan(
 		&code.CodeHash, &code.BrowserSessionID, &code.ClientID,
 		&code.AuthUserID, &code.AppUserID, &code.RedirectURI,
-		&code.CodeChallenge, &code.ExpiresAt, &code.UsedAt, &code.CreatedAt,
+		&code.CodeChallenge, &code.Nonce, &code.Scope, &code.ExpiresAt, &code.UsedAt, &code.CreatedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil

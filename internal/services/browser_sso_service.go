@@ -25,6 +25,7 @@ var (
 	ErrInvalidBrowserSession    = errors.New("invalid browser SSO session")
 	ErrInvalidAuthorizationCode = errors.New("invalid browser SSO authorization code")
 	ErrInvalidPKCEVerifier      = errors.New("invalid PKCE verifier")
+	ErrInvalidClient            = errors.New("invalid browser SSO client credentials")
 )
 
 const (
@@ -338,6 +339,7 @@ func (s *BrowserSSOService) ValidateAuthorizeRequest(
 		return ErrInvalidAuthorizeRequest
 	}
 	if request.ResponseType != "code" || request.State == "" || len(request.State) > 512 ||
+		len(request.Scope) > 512 || len(request.Nonce) > 512 ||
 		request.CodeChallengeMethod != "S256" || !pkceValuePattern.MatchString(request.CodeChallenge) {
 		return ErrInvalidAuthorizeRequest
 	}
@@ -500,6 +502,8 @@ func (s *BrowserSSOService) Authorize(
 		AppUserID:        browserSession.AppUserID,
 		RedirectURI:      request.RedirectURI,
 		CodeChallenge:    request.CodeChallenge,
+		Nonce:            request.Nonce,
+		Scope:            request.Scope,
 		ExpiresAt:        s.now().Add(s.codeTTL),
 	}); err != nil {
 		return nil, err
@@ -515,6 +519,66 @@ func (s *BrowserSSOService) Exchange(
 	redirectURI string,
 	codeVerifier string,
 ) (*models.LoginResult, error) {
+	grant, err := s.redeemCode(ctx, code, clientID, redirectURI, codeVerifier)
+	if err != nil {
+		return nil, err
+	}
+	supabaseSession, err := s.sessionIssuer.IssueSession(ctx, grant.User.Email)
+	if err != nil {
+		return nil, err
+	}
+	if supabaseSession == nil || supabaseSession.User.ID != grant.AuthUserID ||
+		supabaseSession.AccessToken == "" || supabaseSession.RefreshToken == "" {
+		return nil, ErrInvalidBrowserSession
+	}
+	identity, err := s.identities.GetByUserID(ctx, grant.User.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &models.LoginResult{
+		Session:      supabaseSession,
+		Identity:     identity,
+		SSOSessionID: grant.SessionID,
+	}, nil
+}
+
+// CodeGrant is a redeemed authorization code whose browser session, user and
+// approved application membership were all re-checked at redemption time.
+type CodeGrant struct {
+	ClientID   string
+	SessionID  string
+	AuthUserID string
+	AuthTime   time.Time
+	Nonce      string
+	Scope      string
+	User       *models.AppUser
+	Role       string
+}
+
+// RedeemOIDCCode authenticates a confidential client with its secret (the
+// same value it uses for introspection) and redeems an authorization code.
+func (s *BrowserSSOService) RedeemOIDCCode(
+	ctx context.Context,
+	code, clientID, clientSecret, redirectURI, codeVerifier string,
+) (*CodeGrant, error) {
+	if !s.authenticateClient(clientID, clientSecret) {
+		return nil, ErrInvalidClient
+	}
+	return s.redeemCode(ctx, code, clientID, redirectURI, codeVerifier)
+}
+
+func (s *BrowserSSOService) authenticateClient(clientID, secret string) bool {
+	client, ok := s.clients[strings.TrimSpace(clientID)]
+	return ok && strings.TrimSpace(secret) != "" &&
+		subtle.ConstantTimeCompare(client.secretHash[:], HashIntrospectionSecret(secret)) == 1
+}
+
+// redeemCode consumes the code once and checks session, user and membership
+// before any token is issued.
+func (s *BrowserSSOService) redeemCode(
+	ctx context.Context,
+	code, clientID, redirectURI, codeVerifier string,
+) (*CodeGrant, error) {
 	client, ok := s.clients[clientID]
 	if code == "" || !ok {
 		return nil, ErrInvalidAuthorizationCode
@@ -525,13 +589,8 @@ func (s *BrowserSSOService) Exchange(
 	if !pkceValuePattern.MatchString(codeVerifier) {
 		return nil, ErrInvalidPKCEVerifier
 	}
-	expectedChallenge := pkceChallenge(codeVerifier)
 	stored, err := s.store.ConsumeAuthorizationCode(
-		ctx,
-		hashOpaqueToken(code),
-		clientID,
-		redirectURI,
-		expectedChallenge,
+		ctx, hashOpaqueToken(code), clientID, redirectURI, pkceChallenge(codeVerifier),
 	)
 	if err != nil {
 		return nil, err
@@ -539,41 +598,52 @@ func (s *BrowserSSOService) Exchange(
 	if stored == nil {
 		return nil, ErrInvalidAuthorizationCode
 	}
-	browserSession, err := s.store.GetActiveSessionByID(ctx, stored.BrowserSessionID)
+	grant, err := s.currentGrant(ctx, clientID, stored.BrowserSessionID, stored.AppUserID)
 	if err != nil {
 		return nil, err
 	}
-	if browserSession == nil || browserSession.AuthUserID != stored.AuthUserID ||
-		browserSession.AppUserID != stored.AppUserID {
+	if grant.AuthUserID != stored.AuthUserID {
 		return nil, ErrInvalidBrowserSession
 	}
-	user, err := s.users.GetByAuthUserID(ctx, stored.AuthUserID)
+	grant.Nonce, grant.Scope = stored.Nonce, stored.Scope
+	return grant, nil
+}
+
+// CurrentGrant re-checks that a session is active and still bound to the user,
+// and that the user still has approved access to the client's application.
+func (s *BrowserSSOService) CurrentGrant(ctx context.Context, clientID, sessionID, appUserID string) (*CodeGrant, error) {
+	if _, ok := s.clients[clientID]; !ok || !browserSessionIDPattern.MatchString(sessionID) {
+		return nil, ErrInvalidBrowserSession
+	}
+	return s.currentGrant(ctx, clientID, sessionID, appUserID)
+}
+
+func (s *BrowserSSOService) currentGrant(ctx context.Context, clientID, sessionID, appUserID string) (*CodeGrant, error) {
+	browserSession, err := s.store.GetActiveSessionByID(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	if user == nil || user.ID != stored.AppUserID || strings.TrimSpace(user.Email) == "" {
+	if browserSession == nil || browserSession.AppUserID != appUserID {
 		return nil, ErrInvalidBrowserSession
 	}
-	supabaseSession, err := s.sessionIssuer.IssueSession(ctx, user.Email)
+	user, err := s.users.GetByAuthUserID(ctx, browserSession.AuthUserID)
 	if err != nil {
 		return nil, err
 	}
-	if supabaseSession == nil || supabaseSession.User.ID != stored.AuthUserID ||
-		supabaseSession.AccessToken == "" || supabaseSession.RefreshToken == "" {
+	if user == nil || user.ID != appUserID || strings.TrimSpace(user.Email) == "" {
 		return nil, ErrInvalidBrowserSession
 	}
-	application, err := s.applications.GetByAppUserID(ctx, stored.AppUserID, client.applicationCode)
+	application, err := s.applications.GetByAppUserID(ctx, appUserID, s.clients[clientID].applicationCode)
 	if err != nil || application == nil || application.Status != models.MembershipStatusApproved {
 		return nil, ErrAccountUnavailable
 	}
-	identity, err := s.identities.GetByUserID(ctx, stored.AppUserID)
-	if err != nil {
-		return nil, err
-	}
-	return &models.LoginResult{
-		Session:      supabaseSession,
-		Identity:     identity,
-		SSOSessionID: browserSession.ID,
+	return &CodeGrant{
+		ClientID:   clientID,
+		SessionID:  browserSession.ID,
+		AuthUserID: browserSession.AuthUserID,
+		AuthTime:   browserSession.CreatedAt,
+		User:       user,
+		Role:       application.Role,
 	}, nil
 }
 

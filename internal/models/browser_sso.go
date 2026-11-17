@@ -21,6 +21,8 @@ type BrowserSSOAuthorizationCode struct {
 	AppUserID        string
 	RedirectURI      string
 	CodeChallenge    string
+	Nonce            string
+	Scope            string
 	ExpiresAt        time.Time
 	UsedAt           *time.Time
 	CreatedAt        time.Time
@@ -33,6 +35,9 @@ type BrowserSSOAuthorizeRequest struct {
 	State               string `json:"state"`
 	CodeChallenge       string `json:"codeChallenge"`
 	CodeChallengeMethod string `json:"codeChallengeMethod"`
+	// Scope and Nonce are OpenID Connect parameters; legacy clients omit them.
+	Scope string `json:"scope,omitempty"`
+	Nonce string `json:"nonce,omitempty"`
 }
 
 type BrowserSSOAuthorizeResult struct {

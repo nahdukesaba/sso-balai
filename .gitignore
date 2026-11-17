@@ -9,6 +9,9 @@ tmp/
 *.exe
 *.out
 
+# Private keys (OIDC signing key)
+*.pem
+
 # Logs
 *.log
 

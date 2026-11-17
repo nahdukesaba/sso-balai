@@ -23,6 +23,8 @@ type Config struct {
 	SSOBrowserCookieSameSite    string
 	SSOBrowserSessionTTL        time.Duration
 	SSOAuthorizationCodeTTL     time.Duration
+	OIDCIssuer                  string
+	OIDCSigningKeyFile          string
 
 	SupabaseURL       string
 	SupabasePublicKey string
@@ -55,6 +57,8 @@ func Load() (*Config, error) {
 		SSOBrowserCookieSameSite: getEnv("SSO_BROWSER_COOKIE_SAME_SITE", "Lax"),
 		SSOBrowserSessionTTL:     getEnvDuration("SSO_BROWSER_SESSION_TTL", 8*time.Hour),
 		SSOAuthorizationCodeTTL:  getEnvDuration("SSO_AUTHORIZATION_CODE_TTL", 3*time.Minute),
+		OIDCIssuer:               strings.TrimRight(strings.TrimSpace(os.Getenv("SSO_OIDC_ISSUER")), "/"),
+		OIDCSigningKeyFile:       strings.TrimSpace(os.Getenv("SSO_OIDC_SIGNING_KEY_FILE")),
 
 		SupabaseURL: os.Getenv("SUPABASE_URL"),
 
@@ -83,6 +87,18 @@ func Load() (*Config, error) {
 		[]string{cfg.SupabaseInviteRedirectURL},
 	); err != nil {
 		return nil, err
+	}
+
+	if cfg.OIDCIssuer != "" || cfg.OIDCSigningKeyFile != "" {
+		if cfg.OIDCIssuer == "" || cfg.OIDCSigningKeyFile == "" {
+			return nil, fmt.Errorf("SSO_OIDC_ISSUER and SSO_OIDC_SIGNING_KEY_FILE must be set together")
+		}
+		if !cfg.SSOBrowserEnabled {
+			return nil, fmt.Errorf("OpenID Connect requires SSO_BROWSER_ENABLED=true")
+		}
+		if err := validateConfiguredHTTPURLs("SSO_OIDC_ISSUER", []string{cfg.OIDCIssuer}); err != nil {
+			return nil, err
+		}
 	}
 
 	if cfg.SSOBrowserEnabled {

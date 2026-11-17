@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -250,6 +251,18 @@ func main() {
 		cfg.SSOBrowserSessionTTL,
 	)
 	browserSSOHandler.SetAccountPortalService(accountPortalService)
+	var oidcProvider *services.OIDCProvider
+	if cfg.OIDCIssuer != "" {
+		signingKey, keyErr := os.ReadFile(cfg.OIDCSigningKeyFile)
+		if keyErr != nil {
+			log.Fatalf("failed to read OIDC signing key: %v", keyErr)
+		}
+		oidcProvider, err = services.NewOIDCProvider(cfg.OIDCIssuer, signingKey, browserSSOService)
+		if err != nil {
+			log.Fatalf("failed to initialize OpenID Connect: %v", err)
+		}
+		browserSSOHandler.SetOIDCProvider(oidcProvider)
+	}
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 	app := fiber.New()
 
@@ -268,6 +281,10 @@ func main() {
 		browserSSOHandler,
 	)
 	router.RegisterKlinikAdminUsers(app, klinikAdminUserHandler, authMiddleware)
+	if oidcProvider != nil {
+		router.RegisterOIDC(app, handlers.NewOIDCHandler(oidcProvider))
+		log.Printf("OpenID Connect issuer %s", oidcProvider.Issuer())
+	}
 
 	listenAddress := cfg.AppHost + ":" + cfg.AppPort
 
