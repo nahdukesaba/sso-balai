@@ -118,4 +118,4 @@ registry and membership checks:
 Per-application values are rows in `public.sso_clients`, not environment
 variables.
 
-The feature is fail-closed and disabled by default. The local portal is available at `http://sso-balai.test:18082/`. The existing stack already has the Browser SSO schema. The portal launch and logout sequencing fixes add no migration. Migration `000007` adds `public.sso_clients` and `000008` adds the OIDC `nonce`/`scope` code columns; register each client before restarting with Browser SSO enabled.
+The feature is fail-closed and disabled by default. The local portal is available at `http://sso-balai.test:18082/`. The existing stack already has the Browser SSO schema. The portal launch and logout sequencing fixes add no migration. Migration `000008` adds `public.sso_clients` and `000009` adds the OIDC `nonce`/`scope` code columns; register each client before restarting with Browser SSO enabled.

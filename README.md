@@ -337,7 +337,7 @@ Urutan paling aman adalah database/Supabase, Central SSO, backend aplikasi, lalu
 ## Troubleshooting singkat
 
 - `DATABASE_URL is required`: `.env` tidak ditemukan atau connection string belum diisi.
-- Browser SSO gagal saat startup: periksa session key dan pastikan migrasi `000007` sudah jalan serta `public.sso_clients` berisi aplikasi aktif (`go run ./cmd/sso-client`).
+- Browser SSO gagal saat startup: periksa session key dan pastikan migrasi `000008` sudah jalan serta `public.sso_clients` berisi aplikasi aktif (`go run ./cmd/sso-client`).
 - Cookie login tidak tersimpan di lokal: pastikan `SSO_BROWSER_COOKIE_SECURE=false` selama menggunakan HTTP.
 - Email menuju URL yang salah: samakan `.env`, Supabase URL Configuration, dan email template.
 - Tombol **Buka Aplikasi** tidak muncul: membership harus `approved` dan launch URL harus valid.
