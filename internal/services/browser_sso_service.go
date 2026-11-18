@@ -219,7 +219,7 @@ func (s *BrowserSSOService) ValidateCancelReturn(clientID, postLogoutRedirectURI
 func (s *BrowserSSOService) getClient(clientID string) (registeredBrowserSSOClient, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	client, ok := s.getClient(clientID)
+	client, ok := s.clients[strings.TrimSpace(clientID)]
 	return client, ok
 }
 
