@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nahdukesaba/sso-balai/internal/models"
@@ -103,6 +104,7 @@ type BrowserSSOService struct {
 	applications  BrowserSSOApplications
 	enrollments   BrowserSSOEnrollments
 	identities    BrowserSSOIdentities
+	mu            sync.RWMutex
 	clients       map[string]registeredBrowserSSOClient
 	sessionTTL    time.Duration
 	codeTTL       time.Duration
@@ -162,7 +164,7 @@ func (s *BrowserSSOService) ValidatePostLogoutRedirect(clientID, redirectURI str
 	if clientID == "" && redirectURI == "" {
 		return nil
 	}
-	client, ok := s.clients[clientID]
+	client, ok := s.getClient(clientID)
 	if !ok {
 		return ErrInvalidAuthorizeRequest
 	}
@@ -214,8 +216,36 @@ func (s *BrowserSSOService) ValidateCancelReturn(clientID, postLogoutRedirectURI
 	return expectedOrigin + cancelReturn, nil
 }
 
+func (s *BrowserSSOService) getClient(clientID string) (registeredBrowserSSOClient, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	client, ok := s.getClient(clientID)
+	return client, ok
+}
+
+func (s *BrowserSSOService) UpsertClient(config BrowserSSOClient) error {
+	built, err := buildBrowserSSOClientRegistry([]BrowserSSOClient{config})
+	if err != nil {
+		return err
+	}
+	clientID := strings.TrimSpace(config.ClientID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.clients == nil {
+		s.clients = make(map[string]registeredBrowserSSOClient)
+	}
+	s.clients[clientID] = built[clientID]
+	return nil
+}
+
+func (s *BrowserSSOService) RemoveClient(clientID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.clients, strings.TrimSpace(clientID))
+}
+
 func (s *BrowserSSOService) ApplicationCodeForClient(clientID string) (string, error) {
-	client, ok := s.clients[strings.TrimSpace(clientID)]
+	client, ok := s.getClient(clientID)
 	if !ok {
 		return "", ErrInvalidAuthorizeRequest
 	}
@@ -313,7 +343,7 @@ func decodeBrowserSSOKey(encoded string) ([]byte, error) {
 func (s *BrowserSSOService) ValidateAuthorizeRequest(
 	request models.BrowserSSOAuthorizeRequest,
 ) error {
-	client, ok := s.clients[request.ClientID]
+	client, ok := s.getClient(request.ClientID)
 	if !ok {
 		return ErrInvalidAuthorizeRequest
 	}
@@ -365,7 +395,7 @@ func (s *BrowserSSOService) PendingAuthorization(value string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	client, ok := s.clients[request.ClientID]
+	client, ok := s.getClient(request.ClientID)
 	if !ok {
 		return "", ErrInvalidAuthorizeRequest
 	}
@@ -416,7 +446,7 @@ func (s *BrowserSSOService) Authorize(
 	if err := s.ValidateAuthorizeRequest(request); err != nil {
 		return nil, err
 	}
-	client := s.clients[request.ClientID]
+	client, _ := s.getClient(request.ClientID)
 	result := &models.BrowserSSOAuthorizeResult{
 		State: request.State, RedirectURI: request.RedirectURI,
 	}
@@ -494,7 +524,7 @@ func (s *BrowserSSOService) Exchange(
 	redirectURI string,
 	codeVerifier string,
 ) (*models.LoginResult, error) {
-	client, ok := s.clients[clientID]
+	client, ok := s.getClient(clientID)
 	if code == "" || !ok {
 		return nil, ErrInvalidAuthorizationCode
 	}
@@ -563,7 +593,7 @@ func (s *BrowserSSOService) Introspect(
 	sessionID string,
 	appUserID string,
 ) (bool, error) {
-	client, ok := s.clients[strings.TrimSpace(clientID)]
+	client, ok := s.getClient(clientID)
 	providedHash := sha256.Sum256([]byte(strings.TrimSpace(secret)))
 	if !ok || subtle.ConstantTimeCompare(client.secretHash[:], providedHash[:]) != 1 {
 		return false, ErrInvalidBrowserSession

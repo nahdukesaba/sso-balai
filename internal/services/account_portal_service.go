@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nahdukesaba/sso-balai/internal/models"
@@ -23,6 +24,7 @@ type accountPortalApplicationMetadata struct {
 type AccountPortalService struct {
 	browser      *BrowserSSOService
 	applications AccountPortalApplicationStore
+	mu           sync.RWMutex
 	metadata     map[string]accountPortalApplicationMetadata
 }
 
@@ -78,6 +80,22 @@ func NewAccountPortalService(
 }
 
 
+func (s *AccountPortalService) getMetadata(code string) (accountPortalApplicationMetadata, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	meta, ok := s.metadata[strings.ToLower(strings.TrimSpace(code))]
+	return meta, ok
+}
+
+func (s *AccountPortalService) RemoveApplication(code string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.metadata, strings.ToLower(strings.TrimSpace(code)))
+}
+
 func (s *AccountPortalService) RegisterApplication(code, name, description, launchURL string) error {
 	if s == nil {
 		return errors.New("account portal service is required")
@@ -87,6 +105,8 @@ func (s *AccountPortalService) RegisterApplication(code, name, description, laun
 	if code == "" || !validPortalLaunchURL(launchURL) {
 		return errors.New("valid application code and launch URL are required")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.metadata[code] = accountPortalApplicationMetadata{
 		Name:        strings.TrimSpace(name),
 		Description: strings.TrimSpace(description),
@@ -122,7 +142,7 @@ func (s *AccountPortalService) View(
 		if pendingErr != nil {
 			return nil, pendingErr
 		}
-		metadata := s.metadata[applicationCode]
+		metadata, _ := s.getMetadata(applicationCode)
 		name := strings.TrimSpace(metadata.Name)
 		if name == "" {
 			name = applicationCode
@@ -144,7 +164,7 @@ func (s *AccountPortalService) View(
 	}
 	view.Applications = make([]models.PortalApplicationCard, 0, len(accesses))
 	for _, access := range accesses {
-		metadata, ok := s.metadata[strings.ToLower(strings.TrimSpace(access.Code))]
+		metadata, ok := s.getMetadata(access.Code)
 		if !ok {
 			continue
 		}
@@ -200,7 +220,7 @@ func (s *AccountPortalService) Launch(
 	if targetAccess == nil || !targetAccess.HasMembership || targetAccess.Status != models.MembershipStatusApproved {
 		return "", ErrAccountUnavailable
 	}
-	metadata, ok := s.metadata[appCode]
+	metadata, ok := s.getMetadata(appCode)
 	if !ok || !validPortalLaunchURL(metadata.LaunchURL) {
 		return "", ErrAccountUnavailable
 	}
@@ -209,7 +229,8 @@ func (s *AccountPortalService) Launch(
 
 func (s *AccountPortalService) ConfiguredLaunchURL(applicationCode string) string {
 	appCode := strings.ToLower(strings.TrimSpace(applicationCode))
-	return s.metadata[appCode].LaunchURL
+	meta, _ := s.getMetadata(appCode)
+	return meta.LaunchURL
 }
 
 func (s *AccountPortalService) Login(

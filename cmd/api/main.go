@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"log"
 
 	"github.com/gofiber/fiber/v2"
@@ -38,6 +41,7 @@ func main() {
 		repository.NewCentralRegistrationRepository(db)
 	klinikAdminUserRepository := repository.NewKlinikAdminUserRepository(db)
 	browserSSORepository := repository.NewBrowserSSORepository(db)
+	ssoAdminRepository := repository.NewSSOAdminRepository(db)
 
 	applicationEnrollmentRepository :=
 		repository.NewApplicationEnrollmentRepository(
@@ -267,6 +271,40 @@ func main() {
 				log.Fatalf("failed to register sijabu portal card: %v", err)
 			}
 		}
+
+		// Load any dynamic applications registered in PostgreSQL via Admin SSO UI.
+		if dbApps, err := ssoAdminRepository.ListApplications(context.Background()); err == nil {
+			for _, dbApp := range dbApps {
+				if !dbApp.IsActive || dbApp.ClientID == "" || len(dbApp.RedirectURIs) == 0 {
+					continue
+				}
+				if _, existsErr := browserSSOService.ApplicationCodeForClient(dbApp.ClientID); existsErr == nil {
+					continue
+				}
+				secretBytes := make([]byte, 24)
+				_, _ = rand.Read(secretBytes)
+				postLogout := dbApp.PostLogoutRedirectURIs
+				if len(postLogout) == 0 && dbApp.LaunchURL != "" {
+					postLogout = []string{dbApp.LaunchURL}
+				}
+				_ = browserSSOService.UpsertClient(services.BrowserSSOClient{
+					ClientID:               dbApp.ClientID,
+					ApplicationCode:        dbApp.Code,
+					AccessPolicy:           dbApp.AccessPolicy,
+					IntrospectionSecret:    hex.EncodeToString(secretBytes),
+					RedirectURIs:           dbApp.RedirectURIs,
+					PostLogoutRedirectURIs: postLogout,
+				})
+				if dbApp.LaunchURL != "" {
+					_ = accountPortalService.RegisterApplication(
+						dbApp.Code,
+						dbApp.Name,
+						dbApp.Description,
+						dbApp.LaunchURL,
+					)
+				}
+			}
+		}
 	}
 
 	browserSSOHandler := handlers.NewBrowserSSOHandler(
@@ -276,6 +314,7 @@ func main() {
 		cfg.SSOBrowserSessionTTL,
 	)
 	browserSSOHandler.SetAccountPortalService(accountPortalService)
+	browserSSOHandler.SetAdminRepository(ssoAdminRepository)
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 	app := fiber.New()
 

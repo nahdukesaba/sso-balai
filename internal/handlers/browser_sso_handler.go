@@ -12,6 +12,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/nahdukesaba/sso-balai/internal/models"
+	"github.com/nahdukesaba/sso-balai/internal/repository"
 	"github.com/nahdukesaba/sso-balai/internal/services"
 )
 
@@ -26,6 +27,7 @@ const (
 type BrowserSSOHandler struct {
 	service        *services.BrowserSSOService
 	portalService  *services.AccountPortalService
+	adminRepo      *repository.SSOAdminRepository
 	cookieSecure   bool
 	cookieSameSite string
 	sessionTTL     time.Duration

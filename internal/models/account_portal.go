@@ -20,6 +20,7 @@ type PortalApplicationCard struct {
 
 type AccountPortalView struct {
 	Identity             *Identity
+	IsSSOAdmin           bool
 	Applications         []PortalApplicationCard
 	PendingAuthorization *PortalPendingAuthorization
 }
