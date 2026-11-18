@@ -214,6 +214,16 @@ func main() {
 				PostLogoutRedirectURIs: cfg.SSOArsiparisPostLogoutURIs,
 			})
 		}
+		if cfg.SSOSijabuEnabled {
+			ssoClients = append(ssoClients, services.BrowserSSOClient{
+				ClientID:               cfg.SSOSijabuClientID,
+				ApplicationCode:        cfg.SSOSijabuApplicationCode,
+				AccessPolicy:           cfg.SSOSijabuAccessPolicy,
+				IntrospectionSecret:    cfg.SSOSijabuIntrospectionSecret,
+				RedirectURIs:           cfg.SSOSijabuRedirectURIs,
+				PostLogoutRedirectURIs: cfg.SSOSijabuPostLogoutURIs,
+			})
+		}
 
 		browserSSOService, err = services.NewBrowserSSOService(
 			browserSSORepository,
@@ -246,6 +256,16 @@ func main() {
 		)
 		if err != nil {
 			log.Fatalf("failed to initialize account portal: %v", err)
+		}
+		if cfg.SSOSijabuEnabled {
+			if err := accountPortalService.RegisterApplication(
+				cfg.SSOSijabuApplicationCode,
+				"Portal BP3KP (SIJABU)",
+				"Portal layanan informasi perumahan, pengaduan masyarakat, dan akses pegawai BP3KP Sumatera II",
+				cfg.PortalSijabuLaunchURL,
+			); err != nil {
+				log.Fatalf("failed to register sijabu portal card: %v", err)
+			}
 		}
 	}
 

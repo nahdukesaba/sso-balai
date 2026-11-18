@@ -45,6 +45,14 @@ type Config struct {
 	SSOArsiparisRedirectURIs        []string
 	SSOArsiparisPostLogoutURIs      []string
 	PortalArsiparisLaunchURL        string
+	SSOSijabuEnabled                bool
+	SSOSijabuClientID               string
+	SSOSijabuApplicationCode        string
+	SSOSijabuAccessPolicy           string
+	SSOSijabuIntrospectionSecret    string
+	SSOSijabuRedirectURIs           []string
+	SSOSijabuPostLogoutURIs         []string
+	PortalSijabuLaunchURL           string
 
 	SupabaseURL       string
 	SupabasePublicKey string
@@ -99,6 +107,14 @@ func Load() (*Config, error) {
 		SSOArsiparisRedirectURIs:        splitCSV(os.Getenv("SSO_ARSIPARIS_REDIRECT_URIS")),
 		SSOArsiparisPostLogoutURIs:      splitCSV(os.Getenv("SSO_ARSIPARIS_POST_LOGOUT_REDIRECT_URIS")),
 		PortalArsiparisLaunchURL:        strings.TrimSpace(os.Getenv("PORTAL_ARSIPARIS_LAUNCH_URL")),
+		SSOSijabuEnabled:                getEnvBool("SSO_SIJABU_ENABLED", false),
+		SSOSijabuClientID:               strings.TrimSpace(getEnv("SSO_SIJABU_CLIENT_ID", "sijabu-landing-web")),
+		SSOSijabuApplicationCode:        strings.TrimSpace(getEnv("SSO_SIJABU_APPLICATION_CODE", "sijabu")),
+		SSOSijabuAccessPolicy:           strings.ToUpper(strings.TrimSpace(getEnv("SSO_SIJABU_ACCESS_POLICY", "AUTO_USER"))),
+		SSOSijabuIntrospectionSecret:    strings.TrimSpace(os.Getenv("SSO_SIJABU_INTROSPECTION_SECRET")),
+		SSOSijabuRedirectURIs:           splitCSV(os.Getenv("SSO_SIJABU_REDIRECT_URIS")),
+		SSOSijabuPostLogoutURIs:         splitCSV(os.Getenv("SSO_SIJABU_POST_LOGOUT_REDIRECT_URIS")),
+		PortalSijabuLaunchURL:           strings.TrimSpace(getEnv("PORTAL_SIJABU_LAUNCH_URL", "https://bp3kpsumatera2.com/")),
 
 		SupabaseURL: os.Getenv("SUPABASE_URL"),
 
@@ -205,6 +221,30 @@ func Load() (*Config, error) {
 				return nil, err
 			}
 			if err := validateConfiguredHTTPURLs("PORTAL_ARSIPARIS_LAUNCH_URL", []string{cfg.PortalArsiparisLaunchURL}); err != nil {
+				return nil, err
+			}
+		}
+		if cfg.SSOSijabuEnabled {
+			if err := validateSSOClientSecurity("SIJABU", cfg.SSOSijabuAccessPolicy, cfg.SSOSijabuIntrospectionSecret); err != nil {
+				return nil, err
+			}
+			if strings.TrimSpace(cfg.SSOSijabuClientID) == "" || strings.TrimSpace(cfg.SSOSijabuApplicationCode) == "" {
+				return nil, fmt.Errorf("Sijabu browser SSO client ID and application code are required")
+			}
+			sijabuClientID := strings.TrimSpace(cfg.SSOSijabuClientID)
+			if silapetClientID == sijabuClientID || klinikClientID == sijabuClientID {
+				return nil, fmt.Errorf("browser SSO client IDs must be unique")
+			}
+			if len(cfg.SSOSijabuRedirectURIs) == 0 {
+				return nil, fmt.Errorf("SSO_SIJABU_REDIRECT_URIS is required when browser SSO is enabled")
+			}
+			if len(cfg.SSOSijabuPostLogoutURIs) == 0 {
+				return nil, fmt.Errorf("SSO_SIJABU_POST_LOGOUT_REDIRECT_URIS is required when browser SSO is enabled")
+			}
+			if err := validateConfiguredHTTPURLs("SSO_SIJABU_REDIRECT_URIS", cfg.SSOSijabuRedirectURIs); err != nil {
+				return nil, err
+			}
+			if err := validateConfiguredHTTPURLs("SSO_SIJABU_POST_LOGOUT_REDIRECT_URIS", cfg.SSOSijabuPostLogoutURIs); err != nil {
 				return nil, err
 			}
 		}

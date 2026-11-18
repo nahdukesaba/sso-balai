@@ -77,6 +77,24 @@ func NewAccountPortalService(
 	}, nil
 }
 
+
+func (s *AccountPortalService) RegisterApplication(code, name, description, launchURL string) error {
+	if s == nil {
+		return errors.New("account portal service is required")
+	}
+	code = strings.ToLower(strings.TrimSpace(code))
+	launchURL = strings.TrimSpace(launchURL)
+	if code == "" || !validPortalLaunchURL(launchURL) {
+		return errors.New("valid application code and launch URL are required")
+	}
+	s.metadata[code] = accountPortalApplicationMetadata{
+		Name:        strings.TrimSpace(name),
+		Description: strings.TrimSpace(description),
+		LaunchURL:   launchURL,
+	}
+	return nil
+}
+
 func validPortalLaunchURL(value string) bool {
 	if strings.ContainsAny(value, "*#") {
 		return false
