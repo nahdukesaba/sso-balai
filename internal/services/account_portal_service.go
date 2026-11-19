@@ -64,13 +64,11 @@ func NewAccountPortalService(
 			Description: "Portal layanan informasi, konsultasi, dan pendampingan teknis perumahan serta permukiman BP3KP Sumatera II",
 			LaunchURL:   klinikLaunchURL,
 		},
-	}
-	if resolvedArsiparisLaunchURL != "" {
-		metadata[models.ApplicationCodeArsiparis] = accountPortalApplicationMetadata{
+		models.ApplicationCodeArsiparis: {
 			Name:        "Arsiparis",
 			Description: "Portal layanan pengelolaan arsip kegiatan, laporan, dan bukti dukung resmi BP3KP Sumatera II",
 			LaunchURL:   resolvedArsiparisLaunchURL,
-		}
+		},
 	}
 	return &AccountPortalService{
 		browser:      browser,

@@ -207,16 +207,14 @@ func main() {
 				RedirectURIs:           cfg.SSOKlinikRedirectURIs,
 				PostLogoutRedirectURIs: cfg.SSOKlinikPostLogoutURIs,
 			},
-		}
-		if cfg.SSOArsiparisEnabled {
-			ssoClients = append(ssoClients, services.BrowserSSOClient{
+			{
 				ClientID:               cfg.SSOArsiparisClientID,
 				ApplicationCode:        cfg.SSOArsiparisApplicationCode,
 				AccessPolicy:           cfg.SSOArsiparisAccessPolicy,
 				IntrospectionSecret:    cfg.SSOArsiparisIntrospectionSecret,
 				RedirectURIs:           cfg.SSOArsiparisRedirectURIs,
 				PostLogoutRedirectURIs: cfg.SSOArsiparisPostLogoutURIs,
-			})
+			},
 		}
 		if cfg.SSOSijabuEnabled {
 			ssoClients = append(ssoClients, services.BrowserSSOClient{
@@ -257,16 +255,12 @@ func main() {
 		if err != nil {
 			log.Fatalf("failed to initialize browser SSO: %v", err)
 		}
-		var portalLaunchURLs []string
-		if cfg.SSOArsiparisEnabled {
-			portalLaunchURLs = append(portalLaunchURLs, cfg.PortalArsiparisLaunchURL)
-		}
 		accountPortalService, err = services.NewAccountPortalService(
 			browserSSOService,
 			applicationRepository,
 			cfg.PortalSilapetLaunchURL,
 			cfg.PortalKlinikLaunchURL,
-			portalLaunchURLs...,
+			cfg.PortalArsiparisLaunchURL,
 		)
 		if err != nil {
 			log.Fatalf("failed to initialize account portal: %v", err)

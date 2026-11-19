@@ -34,7 +34,6 @@ func TestLoadBrowserSSOClients(t *testing.T) {
 	t.Setenv("SSO_KLINIK_REDIRECT_URIS", " http://localhost:3000/auth/sso/callback ")
 	t.Setenv("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS", " http://localhost:3000/login ")
 	t.Setenv("PORTAL_KLINIK_LAUNCH_URL", "http://klinik-pkp.test:3000/api/auth/sso/start")
-	t.Setenv("SSO_ARSIPARIS_ENABLED", "true")
 	t.Setenv("SSO_ARSIPARIS_CLIENT_ID", " arsiparis-web ")
 	t.Setenv("SSO_ARSIPARIS_APPLICATION_CODE", " arsiparis ")
 	t.Setenv("SSO_ARSIPARIS_INTROSPECTION_SECRET", "arsiparis-test-introspection-secret-01")
@@ -46,8 +45,7 @@ func TestLoadBrowserSSOClients(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.SSOArsiparisEnabled ||
-		cfg.SSOSilapetClientID != "silapet-web" || cfg.SSOSilapetApplicationCode != "silapet" ||
+	if cfg.SSOSilapetClientID != "silapet-web" || cfg.SSOSilapetApplicationCode != "silapet" ||
 		cfg.SSOKlinikClientID != "klinik-pkp-web" || cfg.SSOKlinikApplicationCode != "klinik_pkp" ||
 		cfg.SSOArsiparisClientID != "arsiparis-web" || cfg.SSOArsiparisApplicationCode != "arsiparis" ||
 		len(cfg.SSOSilapetRedirectURIs) != 1 || cfg.SSOSilapetRedirectURIs[0] != "http://localhost:8081/auth/sso/callback" ||
@@ -90,60 +88,12 @@ func setupBaseSSOEnv(t *testing.T) {
 	t.Setenv("SSO_KLINIK_REDIRECT_URIS", "http://localhost:3000/auth/sso/callback")
 	t.Setenv("SSO_KLINIK_POST_LOGOUT_REDIRECT_URIS", "http://localhost:3000/login")
 	t.Setenv("PORTAL_KLINIK_LAUNCH_URL", "http://klinik-pkp.test:3000/api/auth/sso/start")
-}
-
-func TestLoadBrowserSSOArsiparisOptional(t *testing.T) {
-	t.Run("browser SSO aktif + Arsiparis disabled + env Arsiparis kosong = berhasil", func(t *testing.T) {
-		setupBaseSSOEnv(t)
-		t.Setenv("SSO_ARSIPARIS_ENABLED", "false")
-		t.Setenv("SSO_ARSIPARIS_INTROSPECTION_SECRET", "")
-		t.Setenv("SSO_ARSIPARIS_REDIRECT_URIS", "")
-		t.Setenv("SSO_ARSIPARIS_POST_LOGOUT_REDIRECT_URIS", "")
-		t.Setenv("PORTAL_ARSIPARIS_LAUNCH_URL", "")
-
-		cfg, err := Load()
-		if err != nil {
-			t.Fatalf("expected load to succeed with Arsiparis disabled and empty env, got err: %v", err)
-		}
-		if cfg.SSOArsiparisEnabled {
-			t.Fatal("expected SSOArsiparisEnabled to be false")
-		}
-	})
-
-	t.Run("Arsiparis enabled + config tidak lengkap = gagal", func(t *testing.T) {
-		setupBaseSSOEnv(t)
-		t.Setenv("SSO_ARSIPARIS_ENABLED", "true")
-		t.Setenv("SSO_ARSIPARIS_INTROSPECTION_SECRET", "")
-		t.Setenv("SSO_ARSIPARIS_REDIRECT_URIS", "")
-		t.Setenv("SSO_ARSIPARIS_POST_LOGOUT_REDIRECT_URIS", "")
-		t.Setenv("PORTAL_ARSIPARIS_LAUNCH_URL", "")
-
-		if _, err := Load(); err == nil {
-			t.Fatal("expected load to fail when Arsiparis is enabled but config is incomplete")
-		}
-	})
-
-	t.Run("Arsiparis enabled + config lengkap = berhasil", func(t *testing.T) {
-		setupBaseSSOEnv(t)
-		t.Setenv("SSO_ARSIPARIS_ENABLED", "true")
-		t.Setenv("SSO_ARSIPARIS_CLIENT_ID", "arsiparis-web")
-		t.Setenv("SSO_ARSIPARIS_APPLICATION_CODE", "arsiparis")
-		t.Setenv("SSO_ARSIPARIS_INTROSPECTION_SECRET", "arsiparis-test-introspection-secret-01")
-		t.Setenv("SSO_ARSIPARIS_REDIRECT_URIS", "http://localhost:8083/api/auth/sso/callback")
-		t.Setenv("SSO_ARSIPARIS_POST_LOGOUT_REDIRECT_URIS", "http://localhost:5173/login")
-		t.Setenv("PORTAL_ARSIPARIS_LAUNCH_URL", "http://localhost:8083/api/auth/sso/start")
-
-		cfg, err := Load()
-		if err != nil {
-			t.Fatalf("expected load to succeed when Arsiparis is enabled and config is complete, got: %v", err)
-		}
-		if !cfg.SSOArsiparisEnabled {
-			t.Fatal("expected SSOArsiparisEnabled to be true")
-		}
-		if cfg.SSOArsiparisClientID != "arsiparis-web" {
-			t.Fatalf("unexpected client ID: %q", cfg.SSOArsiparisClientID)
-		}
-	})
+	t.Setenv("SSO_ARSIPARIS_CLIENT_ID", "arsiparis-web")
+	t.Setenv("SSO_ARSIPARIS_APPLICATION_CODE", "arsiparis")
+	t.Setenv("SSO_ARSIPARIS_INTROSPECTION_SECRET", "arsiparis-test-introspection-secret-01")
+	t.Setenv("SSO_ARSIPARIS_REDIRECT_URIS", "http://localhost:8083/api/auth/sso/callback")
+	t.Setenv("SSO_ARSIPARIS_POST_LOGOUT_REDIRECT_URIS", "http://localhost:5173/login")
+	t.Setenv("PORTAL_ARSIPARIS_LAUNCH_URL", "http://localhost:8083/api/auth/sso/start")
 }
 
 func TestLoadBrowserSSOKompuOptional(t *testing.T) {
