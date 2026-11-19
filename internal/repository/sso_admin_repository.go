@@ -18,6 +18,8 @@ type SSOAdminApplication struct {
 	PostLogoutRedirectURIs []string
 	LaunchURL              string
 	Description            string
+	Port                   *int
+	BackendPort            *int
 }
 
 type SSOAdminUserMembership struct {
@@ -75,7 +77,9 @@ func (r *SSOAdminRepository) ListApplications(ctx context.Context) ([]SSOAdminAp
 			COALESCE(redirect_uris, '{}'),
 			COALESCE(post_logout_redirect_uris, '{}'),
 			COALESCE(launch_url, ''),
-			COALESCE(description, '')
+			COALESCE(description, ''),
+			port,
+			backend_port
 		 FROM public.applications
 		 ORDER BY created_at ASC, name ASC`,
 	)
@@ -98,6 +102,8 @@ func (r *SSOAdminRepository) ListApplications(ctx context.Context) ([]SSOAdminAp
 			&item.PostLogoutRedirectURIs,
 			&item.LaunchURL,
 			&item.Description,
+			&item.Port,
+			&item.BackendPort,
 		); err != nil {
 			return nil, err
 		}
@@ -120,9 +126,9 @@ func (r *SSOAdminRepository) UpsertApplication(ctx context.Context, app SSOAdmin
 		ctx,
 		`INSERT INTO public.applications (
 			code, name, is_active, client_id, access_policy,
-			redirect_uris, post_logout_redirect_uris, launch_url, description
+			redirect_uris, post_logout_redirect_uris, launch_url, description, port, backend_port
 		)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9)
+		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (code) DO UPDATE SET
 			name = EXCLUDED.name,
 			is_active = EXCLUDED.is_active,
@@ -131,7 +137,9 @@ func (r *SSOAdminRepository) UpsertApplication(ctx context.Context, app SSOAdmin
 			redirect_uris = EXCLUDED.redirect_uris,
 			post_logout_redirect_uris = EXCLUDED.post_logout_redirect_uris,
 			launch_url = EXCLUDED.launch_url,
-			description = EXCLUDED.description
+			description = EXCLUDED.description,
+			port = COALESCE(EXCLUDED.port, public.applications.port),
+			backend_port = COALESCE(EXCLUDED.backend_port, public.applications.backend_port)
 		RETURNING id::text`,
 		code,
 		name,
@@ -142,6 +150,8 @@ func (r *SSOAdminRepository) UpsertApplication(ctx context.Context, app SSOAdmin
 		app.PostLogoutRedirectURIs,
 		strings.TrimSpace(app.LaunchURL),
 		strings.TrimSpace(app.Description),
+		app.Port,
+		app.BackendPort,
 	).Scan(&appID)
 	if err != nil {
 		return err

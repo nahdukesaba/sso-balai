@@ -315,11 +315,18 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
   <h2 style="margin-bottom:1rem">Daftar Aplikasi Terdaftar ({{len .Apps}})</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Aplikasi</th><th>Client ID</th><th>Kebijakan</th><th>Redirect URIs</th><th>Status</th></tr></thead>
+      <thead><tr><th>Aplikasi</th><th>Port (FE/BE)</th><th>Client ID</th><th>Kebijakan</th><th>Redirect URIs</th><th>Status</th></tr></thead>
       <tbody>
         {{range .Apps}}
         <tr>
           <td><strong>{{.Name}}</strong><div class="muted" style="font-size:.78rem">{{.Code}} · {{.LaunchURL}}</div></td>
+          <td>
+            <div style="display:flex;gap:.3rem;flex-wrap:wrap">
+              {{if .Port}}<span class="pill" style="font-size:.72rem">FE: {{.Port}}</span>{{end}}
+              {{if .BackendPort}}<span class="pill" style="font-size:.72rem">BE: {{.BackendPort}}</span>{{end}}
+              {{if and (not .Port) (not .BackendPort)}}<span class="muted" style="font-size:.75rem">-</span>{{end}}
+            </div>
+          </td>
           <td><code>{{.ClientID}}</code></td>
           <td><span class="pill admin">{{.AccessPolicy}}</span></td>
           <td style="max-width:22rem;word-break:break-all;font-size:.78rem">{{.RedirectURIsCSV}}</td>
