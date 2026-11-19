@@ -225,6 +225,48 @@ func (s *AccountPortalService) Launch(
 	return metadata.LaunchURL, nil
 }
 
+func (s *AccountPortalService) UserApplications(
+	ctx context.Context,
+	appUserID string,
+) []models.PortalApplicationCard {
+	if s == nil || s.applications == nil {
+		return nil
+	}
+	accesses, err := s.applications.ListForPortalUser(ctx, appUserID)
+	if err != nil {
+		return nil
+	}
+	cards := make([]models.PortalApplicationCard, 0, len(accesses))
+	for _, access := range accesses {
+		metadata, ok := s.getMetadata(access.Code)
+		if !ok {
+			continue
+		}
+		name := strings.TrimSpace(metadata.Name)
+		if name == "" {
+			name = strings.TrimSpace(access.Name)
+		}
+		statusLabel := portalStatusLabel(access.Status, access.HasMembership)
+		roleLabel := portalRoleLabel(access.Role, access.HasMembership)
+		launchable := access.HasMembership && access.Status == models.MembershipStatusApproved &&
+			validPortalLaunchURL(metadata.LaunchURL)
+		launchURL := ""
+		if launchable {
+			launchURL = "/portal/launch?app=" + url.QueryEscape(access.Code)
+		}
+		cards = append(cards, models.PortalApplicationCard{
+			Code:        access.Code,
+			Name:        name,
+			Description: metadata.Description,
+			StatusLabel: statusLabel,
+			RoleLabel:   roleLabel,
+			LaunchURL:   launchURL,
+			Launchable:  launchable,
+		})
+	}
+	return cards
+}
+
 func (s *AccountPortalService) ConfiguredLaunchURL(applicationCode string) string {
 	appCode := strings.ToLower(strings.TrimSpace(applicationCode))
 	meta, _ := s.getMetadata(appCode)

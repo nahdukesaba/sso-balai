@@ -9,13 +9,13 @@ type PortalApplicationAccess struct {
 }
 
 type PortalApplicationCard struct {
-	Code        string
-	Name        string
-	Description string
-	StatusLabel string
-	RoleLabel   string
-	LaunchURL   string
-	Launchable  bool
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	StatusLabel string `json:"statusLabel"`
+	RoleLabel   string `json:"roleLabel"`
+	LaunchURL   string `json:"launchUrl"`
+	Launchable  bool   `json:"launchable"`
 }
 
 type AccountPortalView struct {

@@ -71,22 +71,22 @@ func (h *BrowserSSOHandler) Authorize(c *fiber.Ctx) error {
 		return browserSSOError(c, fiber.StatusBadRequest, "invalid_authorize_request", "Invalid SSO authorization request.")
 	}
 
-	launchApp := strings.ToLower(strings.TrimSpace(c.Cookies(portalLaunchCookie)))
+	h.clearCookie(c, portalLaunchCookie)
 	browserToken := c.Cookies(browserSSOSessionCookie)
-	if launchApp != "" && strings.TrimSpace(browserToken) != "" {
-		h.clearCookie(c, portalLaunchCookie)
-		targetApp, appErr := h.service.ApplicationCodeForClient(request.ClientID)
-		if appErr == nil && strings.EqualFold(launchApp, targetApp) {
-			result, authErr := h.service.Authorize(c.UserContext(), request, browserToken)
-			if authErr == nil && !result.LoginRequired && result.Status == "" && result.Code != "" {
-				redirect, parseErr := url.Parse(result.RedirectURI)
-				if parseErr == nil {
-					query := redirect.Query()
-					query.Set("state", result.State)
+	if strings.TrimSpace(browserToken) != "" {
+		result, authErr := h.service.Authorize(c.UserContext(), request, browserToken)
+		if authErr == nil && !result.LoginRequired {
+			redirect, parseErr := url.Parse(result.RedirectURI)
+			if parseErr == nil {
+				query := redirect.Query()
+				query.Set("state", result.State)
+				if result.Code != "" {
 					query.Set("code", result.Code)
-					redirect.RawQuery = query.Encode()
-					return c.Redirect(redirect.String(), fiber.StatusFound)
+				} else {
+					query.Set("status", result.Status)
 				}
+				redirect.RawQuery = query.Encode()
+				return c.Redirect(redirect.String(), fiber.StatusFound)
 			}
 		}
 	}
@@ -230,6 +230,21 @@ func (h *BrowserSSOHandler) LogoutPage(c *fiber.Ctx) error {
 			"",
 		)
 	}
+	if c.Query("immediate") == "1" || c.Query("confirm") == "1" {
+		_ = h.service.RevokeBrowserSession(
+			c.UserContext(),
+			c.Cookies(browserSSOSessionCookie),
+		)
+		h.clearCookie(c, browserSSOSessionCookie)
+		h.clearCookie(c, browserSSOLogoutCSRF)
+		if redirectURI != "" {
+			return c.Redirect(redirectURI, fiber.StatusSeeOther)
+		}
+		if portalReturn {
+			return c.Redirect("/", fiber.StatusSeeOther)
+		}
+		return h.renderLogoutComplete(c)
+	}
 	if clientID == "" && redirectURI == "" && c.QueryBool("cancelled", false) {
 		return h.renderLogoutState(
 			c,
@@ -309,6 +324,10 @@ func (h *BrowserSSOHandler) Exchange(c *fiber.Ctx) error {
 			return browserSSOError(c, fiber.StatusServiceUnavailable, "sso_unavailable", "SSO exchange could not be completed.")
 		}
 	}
+	var apps []models.PortalApplicationCard
+	if h.portalService != nil && result.Identity != nil && result.Identity.User != nil {
+		apps = h.portalService.UserApplications(c.UserContext(), result.Identity.User.ID)
+	}
 	return c.JSON(fiber.Map{
 		"accessToken":  result.Session.AccessToken,
 		"refreshToken": result.Session.RefreshToken,
@@ -317,6 +336,30 @@ func (h *BrowserSSOHandler) Exchange(c *fiber.Ctx) error {
 		"expiresAt":    result.Session.ExpiresAt,
 		"sid":          result.SSOSessionID,
 		"user":         result.Identity.User,
+		"applications": apps,
+	})
+}
+
+func (h *BrowserSSOHandler) Session(c *fiber.Ctx) error {
+	if h == nil || h.service == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"authenticated": false})
+	}
+	browserToken := c.Cookies(browserSSOSessionCookie)
+	if strings.TrimSpace(browserToken) == "" {
+		return c.JSON(fiber.Map{"authenticated": false})
+	}
+	identity, err := h.service.ResolveBrowserIdentity(c.UserContext(), browserToken)
+	if err != nil || identity == nil || identity.User == nil {
+		return c.JSON(fiber.Map{"authenticated": false})
+	}
+	var apps []models.PortalApplicationCard
+	if h.portalService != nil {
+		apps = h.portalService.UserApplications(c.UserContext(), identity.User.ID)
+	}
+	return c.JSON(fiber.Map{
+		"authenticated": true,
+		"user":          identity.User,
+		"applications":  apps,
 	})
 }
 
