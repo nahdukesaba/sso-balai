@@ -364,7 +364,7 @@ func TestAccountPortalLaunchCardFlows(t *testing.T) {
 		t.Fatalf("expected direct app redirect with code, got %q", directLoc)
 	}
 
-	// 4. Mode A (app-initiated login, no launch cookie) redirects to /?request=... retaining "Lanjut ke aplikasi"
+	// 4. App-initiated login with active browser session directly authorizes
 	modeAReq := httptest.NewRequest(http.MethodGet, authorizeURL, nil)
 	modeAReq.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
 	modeAResp, err := app.Test(modeAReq)
@@ -375,11 +375,29 @@ func TestAccountPortalLaunchCardFlows(t *testing.T) {
 		t.Fatalf("expected 302 Found, got %d", modeAResp.StatusCode)
 	}
 	modeALoc := modeAResp.Header.Get("Location")
-	if !strings.HasPrefix(modeALoc, "/?request=") {
-		t.Fatalf("mode A did not redirect to portal gating: %q", modeALoc)
+	if strings.Contains(modeALoc, "/?request=") {
+		t.Fatalf("app-initiated login showed redundant continue screen: %q", modeALoc)
+	}
+	if !strings.HasPrefix(modeALoc, "http://localhost:8081/auth/sso/callback?code=") ||
+		!strings.Contains(modeALoc, "state=test-state") {
+		t.Fatalf("expected direct app redirect with code, got %q", modeALoc)
 	}
 
-	loggedInPortalRequest := httptest.NewRequest(http.MethodGet, modeALoc, nil)
+	// 5. Unauthenticated authorize request redirects to portal login with pending request
+	unauthReq := httptest.NewRequest(http.MethodGet, authorizeURL, nil)
+	unauthResp, err := app.Test(unauthReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unauthResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected 302 Found, got %d", unauthResp.StatusCode)
+	}
+	unauthLoc := unauthResp.Header.Get("Location")
+	if !strings.HasPrefix(unauthLoc, "/?request=") {
+		t.Fatalf("unauthenticated authorize did not redirect to portal: %q", unauthLoc)
+	}
+
+	loggedInPortalRequest := httptest.NewRequest(http.MethodGet, unauthLoc, nil)
 	loggedInPortalRequest.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
 	loggedInPortalResponse, err := app.Test(loggedInPortalRequest)
 	if err != nil {
@@ -396,7 +414,7 @@ func TestAccountPortalLaunchCardFlows(t *testing.T) {
 		t.Fatalf("logged-in pending authorization copy is incorrect: %s", loggedInPortalHTML)
 	}
 
-	loggedOutPortalResponse, err := app.Test(httptest.NewRequest(http.MethodGet, modeALoc, nil))
+	loggedOutPortalResponse, err := app.Test(httptest.NewRequest(http.MethodGet, unauthLoc, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,5 +467,54 @@ func TestBrowserSSOLogoutCancelPreservesExactAppURLAndRejectsOpenRedirect(t *tes
 	}
 	if !strings.Contains(string(unsafeBody), `href="http://klinik-pkp.test:3000/login"`) {
 		t.Fatalf("unsafe cancel did not fall back to post_logout_redirect_uri: %s", string(unsafeBody))
+	}
+}
+
+func TestImmediateLogoutAndSessionEndpoint(t *testing.T) {
+	session := &models.BrowserSSOSession{
+		ID:         "test-session-id",
+		AuthUserID: "auth-user",
+		AppUserID:  "app-user",
+		ExpiresAt:  time.Now().Add(time.Hour),
+	}
+	handler, store, _ := newAccountPortalHandler(t, session, nil, []models.PortalApplicationAccess{
+		{Code: "silapet", Name: "SILAPET", Status: models.MembershipStatusApproved, HasMembership: true},
+	})
+	app := fiber.New()
+	app.Get("/logout", handler.LogoutPage)
+	app.Get("/api/v1/auth/sso/session", handler.Session)
+
+	// 1. Session endpoint with active session returns authenticated: true and user apps
+	sessReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/sso/session", nil)
+	sessReq.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
+	sessResp, err := app.Test(sessReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", sessResp.StatusCode)
+	}
+	sessBody, _ := io.ReadAll(sessResp.Body)
+	if !strings.Contains(string(sessBody), `"authenticated":true`) || !strings.Contains(string(sessBody), `"code":"silapet"`) {
+		t.Fatalf("expected authenticated session with apps, got: %s", string(sessBody))
+	}
+
+	// 2. Immediate logout revokes session and redirects without confirmation page
+	immReq := httptest.NewRequest(http.MethodGet, "/logout?client_id=klinik-pkp-web&post_logout_redirect_uri="+
+		url.QueryEscape("http://klinik-pkp.test:3000/login")+"&immediate=1", nil)
+	immReq.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
+	immResp, err := app.Test(immReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if immResp.StatusCode != http.StatusSeeOther || immResp.Header.Get("Location") != "http://klinik-pkp.test:3000/login" {
+		t.Fatalf("expected 303 redirect to app login, got %d loc=%s", immResp.StatusCode, immResp.Header.Get("Location"))
+	}
+	if store.revokeCalls != 1 {
+		t.Fatalf("expected 1 revoke call, got %d", store.revokeCalls)
+	}
+	clearedCookie := responseCookie(immResp, browserSSOSessionCookie)
+	if clearedCookie == nil || clearedCookie.Value != "" || !clearedCookie.Expires.Before(time.Now()) {
+		t.Fatalf("expected cleared session cookie, got %#v", clearedCookie)
 	}
 }

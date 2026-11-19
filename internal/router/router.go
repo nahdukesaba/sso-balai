@@ -32,6 +32,7 @@ func Register(
 		app.Post("/logout", browserSSOHandler.LogoutSubmit)
 		app.Post("/api/v1/auth/sso/exchange", browserSSOHandler.Exchange)
 		app.Post("/api/v1/auth/sso/introspect", browserSSOHandler.Introspect)
+		app.Get("/api/v1/auth/sso/session", browserSSOHandler.Session)
 		app.Get("/admin/sso", browserSSOHandler.AdminSSOPage)
 		app.Post("/admin/sso/apps", browserSSOHandler.AdminSSOSaveApp)
 		app.Post("/admin/sso/memberships", browserSSOHandler.AdminSSOSaveMembership)

@@ -71,22 +71,22 @@ func (h *BrowserSSOHandler) Authorize(c *fiber.Ctx) error {
 		return browserSSOError(c, fiber.StatusBadRequest, "invalid_authorize_request", "Invalid SSO authorization request.")
 	}
 
-	launchApp := strings.ToLower(strings.TrimSpace(c.Cookies(portalLaunchCookie)))
+	h.clearCookie(c, portalLaunchCookie)
 	browserToken := c.Cookies(browserSSOSessionCookie)
-	if launchApp != "" && strings.TrimSpace(browserToken) != "" {
-		h.clearCookie(c, portalLaunchCookie)
-		targetApp, appErr := h.service.ApplicationCodeForClient(request.ClientID)
-		if appErr == nil && strings.EqualFold(launchApp, targetApp) {
-			result, authErr := h.service.Authorize(c.UserContext(), request, browserToken)
-			if authErr == nil && !result.LoginRequired && result.Status == "" && result.Code != "" {
-				redirect, parseErr := url.Parse(result.RedirectURI)
-				if parseErr == nil {
-					query := redirect.Query()
-					query.Set("state", result.State)
+	if strings.TrimSpace(browserToken) != "" {
+		result, authErr := h.service.Authorize(c.UserContext(), request, browserToken)
+		if authErr == nil && !result.LoginRequired {
+			redirect, parseErr := url.Parse(result.RedirectURI)
+			if parseErr == nil {
+				query := redirect.Query()
+				query.Set("state", result.State)
+				if result.Code != "" {
 					query.Set("code", result.Code)
-					redirect.RawQuery = query.Encode()
-					return c.Redirect(redirect.String(), fiber.StatusFound)
+				} else {
+					query.Set("status", result.Status)
 				}
+				redirect.RawQuery = query.Encode()
+				return c.Redirect(redirect.String(), fiber.StatusFound)
 			}
 		}
 	}
@@ -230,6 +230,21 @@ func (h *BrowserSSOHandler) LogoutPage(c *fiber.Ctx) error {
 			"",
 		)
 	}
+	if c.Query("immediate") == "1" || c.Query("confirm") == "1" {
+		_ = h.service.RevokeBrowserSession(
+			c.UserContext(),
+			c.Cookies(browserSSOSessionCookie),
+		)
+		h.clearCookie(c, browserSSOSessionCookie)
+		h.clearCookie(c, browserSSOLogoutCSRF)
+		if redirectURI != "" {
+			return c.Redirect(redirectURI, fiber.StatusSeeOther)
+		}
+		if portalReturn {
+			return c.Redirect("/", fiber.StatusSeeOther)
+		}
+		return h.renderLogoutComplete(c)
+	}
 	if clientID == "" && redirectURI == "" && c.QueryBool("cancelled", false) {
 		return h.renderLogoutState(
 			c,
@@ -309,6 +324,10 @@ func (h *BrowserSSOHandler) Exchange(c *fiber.Ctx) error {
 			return browserSSOError(c, fiber.StatusServiceUnavailable, "sso_unavailable", "SSO exchange could not be completed.")
 		}
 	}
+	var apps []models.PortalApplicationCard
+	if h.portalService != nil && result.Identity != nil && result.Identity.User != nil {
+		apps = h.portalService.UserApplications(c.UserContext(), result.Identity.User.ID)
+	}
 	return c.JSON(fiber.Map{
 		"accessToken":  result.Session.AccessToken,
 		"refreshToken": result.Session.RefreshToken,
@@ -317,6 +336,30 @@ func (h *BrowserSSOHandler) Exchange(c *fiber.Ctx) error {
 		"expiresAt":    result.Session.ExpiresAt,
 		"sid":          result.SSOSessionID,
 		"user":         result.Identity.User,
+		"applications": apps,
+	})
+}
+
+func (h *BrowserSSOHandler) Session(c *fiber.Ctx) error {
+	if h == nil || h.service == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"authenticated": false})
+	}
+	browserToken := c.Cookies(browserSSOSessionCookie)
+	if strings.TrimSpace(browserToken) == "" {
+		return c.JSON(fiber.Map{"authenticated": false})
+	}
+	identity, err := h.service.ResolveBrowserIdentity(c.UserContext(), browserToken)
+	if err != nil || identity == nil || identity.User == nil {
+		return c.JSON(fiber.Map{"authenticated": false})
+	}
+	var apps []models.PortalApplicationCard
+	if h.portalService != nil {
+		apps = h.portalService.UserApplications(c.UserContext(), identity.User.ID)
+	}
+	return c.JSON(fiber.Map{
+		"authenticated": true,
+		"user":          identity.User,
+		"applications":  apps,
 	})
 }
 
@@ -368,7 +411,7 @@ func (h *BrowserSSOHandler) renderLogin(
 	c.Set(fiber.HeaderCacheControl, "no-store")
 	c.Set("Referrer-Policy", "no-referrer")
 	c.Set("Content-Security-Policy", fmt.Sprintf(
-		"default-src 'none'; style-src 'unsafe-inline'; form-action 'self' %s; base-uri 'none'; frame-ancestors 'none'",
+		"default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; form-action 'self' %s; base-uri 'none'; frame-ancestors 'none'",
 		redirectOrigin,
 	))
 	c.Type("html", "utf-8")
@@ -454,7 +497,7 @@ func setBrowserSSOPageHeaders(c *fiber.Ctx, formAction string) {
 	c.Set(fiber.HeaderCacheControl, "no-store")
 	c.Set("Referrer-Policy", "no-referrer")
 	c.Set("Content-Security-Policy", fmt.Sprintf(
-		"default-src 'none'; style-src 'unsafe-inline'; form-action %s; base-uri 'none'; frame-ancestors 'none'",
+		"default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; form-action %s; base-uri 'none'; frame-ancestors 'none'",
 		formAction,
 	))
 	c.Type("html", "utf-8")
@@ -507,18 +550,18 @@ func browserSSOError(c *fiber.Ctx, status int, code, message string) error {
 
 var browserSSOLoginTemplate = template.Must(template.New("browser-sso-login").Parse(`<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Masuk SSO Balai</title><style>:root{font-family:system-ui,sans-serif;color:#17212b}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f6f8}main{width:min(28rem,calc(100% - 2rem));padding:2rem;border-radius:.75rem;background:#fff;box-shadow:0 .5rem 2rem #1f29371a}h1{margin-top:0}label{display:block;margin-top:1rem;font-weight:600}input,button{box-sizing:border-box;width:100%;margin-top:.4rem;padding:.75rem;font:inherit}button{margin-top:1.25rem;border:0;border-radius:.4rem;background:#075985;color:#fff;cursor:pointer}.error{color:#b91c1c}</style></head>
-<body><main><h1>Masuk dengan SSO Balai</h1><p>Gunakan akun Balai Anda untuk melanjutkan.</p>{{if .Message}}<p class="error" role="alert">{{.Message}}</p>{{end}}<form method="post" action="/login"><input type="hidden" name="request" value="{{.Request}}"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" required><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required><button type="submit">Masuk</button></form></main></body></html>`))
+<title>Masuk SSO Balai</title>` + accountPortalFavicon + `<style>` + accountPortalStyles + `</style></head>
+<body>` + accountPortalBrandHeader + `</div></header><div class="auth-wrap"><main class="auth-card"><div class="auth-head"><img class="brand-logo" src="` + accountPortalLogoDataURI + `" alt="" aria-hidden="true"><h1>Masuk dengan SSO Balai</h1><p class="lead">Gunakan akun Balai Anda untuk melanjutkan.</p></div>{{if .Message}}<p class="error" role="alert">{{.Message}}</p>{{end}}<form method="post" action="/login"><input type="hidden" name="request" value="{{.Request}}"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" placeholder="nama@bp3kpsumatera2.com" required><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Masukkan password" required><button class="button" type="submit" style="width:100%;margin-top:1.35rem">Masuk</button></form></main></div><footer class="portal-foot" style="margin-top:1rem;margin-bottom:2rem">Kementerian Perumahan dan Kawasan Permukiman · BP3KP Sumatera II</footer></body></html>`))
 
 var browserSSOLogoutTemplate = template.Must(template.New("browser-sso-logout").Parse(`<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Konfirmasi Keluar Akun Balai Pegawai</title><style>:root{font-family:system-ui,sans-serif;color:#17212b}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f6f8}main{width:min(28rem,calc(100% - 2rem));padding:2rem;border-radius:.75rem;background:#fff;box-shadow:0 .5rem 2rem #1f29371a}h1{margin-top:0}form{margin-top:1.5rem}button,a{box-sizing:border-box;display:block;width:100%;padding:.75rem;border-radius:.4rem;text-align:center;font:inherit;text-decoration:none}button{border:0;background:#075985;color:#fff;cursor:pointer}a{margin-top:.75rem;border:1px solid #cbd5e1;color:#17212b}</style></head>
-<body><main><h1>Keluar dari Akun Balai?</h1><p>Anda akan keluar dari semua aplikasi yang menggunakan sesi Akun Balai Pegawai!</p><form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><input type="hidden" name="post_logout_redirect_uri" value="{{.RedirectURI}}"><input type="hidden" name="portal" value="{{.Portal}}"><button type="submit">Keluar</button></form><a href="{{.CancelURL}}">Batal</a></main></body></html>`))
+<title>Konfirmasi Keluar Akun Balai Pegawai</title>` + accountPortalFavicon + `<style>` + accountPortalStyles + `</style></head>
+<body>` + accountPortalBrandHeader + `</div></header><div class="auth-wrap"><main class="auth-card" style="text-align:center"><div class="icon-badge danger" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></div><h1>Keluar dari Akun Balai?</h1><p class="lead" style="margin-top:.6rem">Anda akan keluar dari semua aplikasi yang menggunakan sesi Akun Balai Pegawai!</p><div class="notice-box"><strong>Perhatian</strong>Sesi masuk pada seluruh aplikasi internal Balai (SILAPET, Klinik PKP, Arsiparis, Sijabu, Kompu) yang terhubung pada peramban ini akan diakhiri.</div><div class="actions" style="margin-top:1.5rem"><form method="post" action="/logout" style="width:100%;margin:0"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><input type="hidden" name="post_logout_redirect_uri" value="{{.RedirectURI}}"><input type="hidden" name="portal" value="{{.Portal}}"><button type="submit">Keluar</button></form><a class="button secondary" href="{{.CancelURL}}">Batal</a></div></main></div><footer class="portal-foot" style="margin-top:1rem;margin-bottom:2rem">Kementerian Perumahan dan Kawasan Permukiman · BP3KP Sumatera II</footer></body></html>`))
 
 var browserSSOLogoutStateTemplate = template.Must(template.New("browser-sso-logout-state").Parse(`<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.Title}}</title><style>:root{font-family:system-ui,sans-serif;color:#17212b}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f6f8}main{width:min(28rem,calc(100% - 2rem));padding:2rem;border-radius:.75rem;background:#fff;box-shadow:0 .5rem 2rem #1f29371a}h1{margin-top:0}a{box-sizing:border-box;display:block;width:100%;margin-top:1rem;padding:.75rem;border:1px solid #cbd5e1;border-radius:.4rem;color:#17212b;text-align:center;text-decoration:none}</style></head>
-<body><main><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .ActionURL}}<a href="{{.ActionURL}}">{{.ActionLabel}}</a>{{end}}</main></body></html>`))
+<title>{{.Title}}</title>` + accountPortalFavicon + `<style>` + accountPortalStyles + `</style></head>
+<body>` + accountPortalBrandHeader + `</div></header><div class="auth-wrap"><main class="auth-card" style="text-align:center"><div class="icon-badge info" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></div><h1>{{.Title}}</h1><p class="lead" style="margin-top:.6rem">{{.Message}}</p>{{if .ActionURL}}<div class="actions" style="margin-top:1.5rem"><a class="button" href="{{.ActionURL}}">{{.ActionLabel}}</a></div>{{end}}</main></div><footer class="portal-foot" style="margin-top:1rem;margin-bottom:2rem">Kementerian Perumahan dan Kawasan Permukiman · BP3KP Sumatera II</footer></body></html>`))
 
-const browserSSOLogoutCompletePage = `<!doctype html>
-<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Anda telah keluar</title><style>:root{font-family:system-ui,sans-serif;color:#17212b}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f6f8}main{width:min(28rem,calc(100% - 2rem));padding:2rem;border-radius:.75rem;background:#fff;box-shadow:0 .5rem 2rem #1f29371a}</style></head><body><main><h1>Anda telah keluar</h1><p>Sesi akun pada browser ini telah berakhir.</p></main></body></html>`
+var browserSSOLogoutCompletePage = `<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Anda telah keluar</title>` + accountPortalFavicon + `<style>` + accountPortalStyles + `</style></head><body>` + accountPortalBrandHeader + `</div></header><div class="auth-wrap"><main class="auth-card" style="text-align:center"><div class="icon-badge success" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div><h1>Anda telah keluar</h1><p class="lead" style="margin-top:.6rem">Sesi akun pada browser ini telah berakhir.</p><div class="actions" style="margin-top:1.5rem"><a class="button" href="/account/login">Masuk Kembali</a></div></main></div><footer class="portal-foot" style="margin-top:1rem;margin-bottom:2rem">Kementerian Perumahan dan Kawasan Permukiman · BP3KP Sumatera II</footer></body></html>`
