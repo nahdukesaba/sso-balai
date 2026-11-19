@@ -335,26 +335,3 @@ func (s *AuthService) AuthenticateAccessToken(
 		accessToken,
 	)
 }
-
-// loadCentralIdentity validates only the availability of the central
-// identity. Application-specific authorization is resolved separately
-// through app_memberships.
-func (s *AuthService) loadCentralIdentity(
-	ctx context.Context,
-	userID string,
-) (*models.Identity, error) {
-	identity, err := s.identityService.GetByUserID(ctx, userID)
-	if err != nil {
-		if errors.Is(err, ErrUserNotFound) {
-			return nil, ErrAccountUnavailable
-		}
-
-		return nil, err
-	}
-
-	if identity == nil || identity.User == nil {
-		return nil, ErrAccountUnavailable
-	}
-
-	return identity, nil
-}
