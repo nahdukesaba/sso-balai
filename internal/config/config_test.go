@@ -200,6 +200,54 @@ func TestLoadBrowserSSOKompuOptional(t *testing.T) {
 	})
 }
 
+func TestLoadBrowserSSORealisasiBSPSOptional(t *testing.T) {
+	setEnv := func(t *testing.T, clientID string) {
+		t.Helper()
+		setupBaseSSOEnv(t)
+		t.Setenv("SSO_REALISASI_BSPS_ENABLED", "true")
+		t.Setenv("SSO_REALISASI_BSPS_CLIENT_ID", clientID)
+		t.Setenv("SSO_REALISASI_BSPS_INTROSPECTION_SECRET", "bsps-test-introspection-secret-0000001")
+		t.Setenv("SSO_REALISASI_BSPS_REDIRECT_URIS", "http://localhost:5174/auth/callback")
+		t.Setenv("SSO_REALISASI_BSPS_POST_LOGOUT_REDIRECT_URIS", "http://localhost:5174/")
+		t.Setenv("PORTAL_REALISASI_BSPS_LAUNCH_URL", "http://localhost:5174/api/auth/sso/start")
+	}
+
+	t.Run("disabled secara default", func(t *testing.T) {
+		setupBaseSSOEnv(t)
+		cfg, err := Load()
+		if err != nil || cfg.SSORealisasiBSPSEnabled {
+			t.Fatalf("expected disabled client, got err=%v", err)
+		}
+	})
+
+	t.Run("enabled + config lengkap = berhasil", func(t *testing.T) {
+		setEnv(t, " realisasi-bsps-web ")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("expected load to succeed, got: %v", err)
+		}
+		if cfg.SSORealisasiBSPSClientID != "realisasi-bsps-web" || cfg.SSORealisasiBSPSApplicationCode != "realisasi-bsps" ||
+			len(cfg.SSORealisasiBSPSRedirectURIs) != 1 {
+			t.Fatal("Realisasi BSPS client was not loaded correctly")
+		}
+	})
+
+	t.Run("secret pendek = gagal", func(t *testing.T) {
+		setEnv(t, "realisasi-bsps-web")
+		t.Setenv("SSO_REALISASI_BSPS_INTROSPECTION_SECRET", "short")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected load to fail with a short introspection secret")
+		}
+	})
+
+	t.Run("client ID duplikat = gagal", func(t *testing.T) {
+		setEnv(t, "silapet-web")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected load to fail on duplicate client ID")
+		}
+	})
+}
+
 func TestValidateConfiguredHTTPURLs(t *testing.T) {
 	for _, values := range [][]string{
 		{"http://localhost:8081/auth/sso/callback"},

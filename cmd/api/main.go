@@ -238,6 +238,16 @@ func main() {
 				PostLogoutRedirectURIs: cfg.SSOKompuPostLogoutURIs,
 			})
 		}
+		if cfg.SSORealisasiBSPSEnabled {
+			ssoClients = append(ssoClients, services.BrowserSSOClient{
+				ClientID:               cfg.SSORealisasiBSPSClientID,
+				ApplicationCode:        cfg.SSORealisasiBSPSApplicationCode,
+				AccessPolicy:           cfg.SSORealisasiBSPSAccessPolicy,
+				IntrospectionSecret:    cfg.SSORealisasiBSPSIntrospectionSecret,
+				RedirectURIs:           cfg.SSORealisasiBSPSRedirectURIs,
+				PostLogoutRedirectURIs: cfg.SSORealisasiBSPSPostLogoutURIs,
+			})
+		}
 
 		browserSSOService, err = services.NewBrowserSSOService(
 			browserSSORepository,
@@ -289,6 +299,16 @@ func main() {
 				cfg.PortalKompuLaunchURL,
 			); err != nil {
 				log.Fatalf("failed to register kompu portal card: %v", err)
+			}
+		}
+		if cfg.SSORealisasiBSPSEnabled {
+			if err := accountPortalService.RegisterApplication(
+				cfg.SSORealisasiBSPSApplicationCode,
+				"Realisasi BSPS",
+				"Dashboard realisasi penyaluran dana bantuan Bedah Rumah (BSPS) BP3KP Sumatera II",
+				cfg.PortalRealisasiBSPSLaunchURL,
+			); err != nil {
+				log.Fatalf("failed to register realisasi bsps portal card: %v", err)
 			}
 		}
 
