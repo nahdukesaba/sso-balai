@@ -61,6 +61,15 @@ type Config struct {
 	SSOKompuPostLogoutURIs          []string
 	PortalKompuLaunchURL            string
 
+	SSORealisasiBSPSEnabled             bool
+	SSORealisasiBSPSClientID            string
+	SSORealisasiBSPSApplicationCode     string
+	SSORealisasiBSPSAccessPolicy        string
+	SSORealisasiBSPSIntrospectionSecret string
+	SSORealisasiBSPSRedirectURIs        []string
+	SSORealisasiBSPSPostLogoutURIs      []string
+	PortalRealisasiBSPSLaunchURL        string
+
 	SupabaseURL       string
 	SupabasePublicKey string
 	SupabaseAdminKey  string
@@ -129,6 +138,15 @@ func Load() (*Config, error) {
 		SSOKompuRedirectURIs:            splitCSV(os.Getenv("SSO_KOMPU_REDIRECT_URIS")),
 		SSOKompuPostLogoutURIs:          splitCSV(os.Getenv("SSO_KOMPU_POST_LOGOUT_REDIRECT_URIS")),
 		PortalKompuLaunchURL:            strings.TrimSpace(os.Getenv("PORTAL_KOMPU_LAUNCH_URL")),
+
+		SSORealisasiBSPSEnabled:             getEnvBool("SSO_REALISASI_BSPS_ENABLED", false),
+		SSORealisasiBSPSClientID:            strings.TrimSpace(getEnv("SSO_REALISASI_BSPS_CLIENT_ID", "realisasi-bsps-web")),
+		SSORealisasiBSPSApplicationCode:     strings.TrimSpace(getEnv("SSO_REALISASI_BSPS_APPLICATION_CODE", "realisasi-bsps")),
+		SSORealisasiBSPSAccessPolicy:        strings.ToUpper(strings.TrimSpace(getEnv("SSO_REALISASI_BSPS_ACCESS_POLICY", "AUTO_USER"))),
+		SSORealisasiBSPSIntrospectionSecret: strings.TrimSpace(os.Getenv("SSO_REALISASI_BSPS_INTROSPECTION_SECRET")),
+		SSORealisasiBSPSRedirectURIs:        splitCSV(os.Getenv("SSO_REALISASI_BSPS_REDIRECT_URIS")),
+		SSORealisasiBSPSPostLogoutURIs:      splitCSV(os.Getenv("SSO_REALISASI_BSPS_POST_LOGOUT_REDIRECT_URIS")),
+		PortalRealisasiBSPSLaunchURL:        strings.TrimSpace(os.Getenv("PORTAL_REALISASI_BSPS_LAUNCH_URL")),
 
 		SupabaseURL: os.Getenv("SUPABASE_URL"),
 
@@ -282,6 +300,36 @@ func Load() (*Config, error) {
 				return nil, err
 			}
 			if err := validateConfiguredHTTPURLs("PORTAL_KOMPU_LAUNCH_URL", []string{cfg.PortalKompuLaunchURL}); err != nil {
+				return nil, err
+			}
+		}
+		if cfg.SSORealisasiBSPSEnabled {
+			if err := validateSSOClientSecurity("REALISASI_BSPS", cfg.SSORealisasiBSPSAccessPolicy, cfg.SSORealisasiBSPSIntrospectionSecret); err != nil {
+				return nil, err
+			}
+			if strings.TrimSpace(cfg.SSORealisasiBSPSClientID) == "" || strings.TrimSpace(cfg.SSORealisasiBSPSApplicationCode) == "" {
+				return nil, fmt.Errorf("Realisasi BSPS browser SSO client ID and application code are required")
+			}
+			bspsClientID := strings.TrimSpace(cfg.SSORealisasiBSPSClientID)
+			if silapetClientID == bspsClientID || klinikClientID == bspsClientID ||
+				(cfg.SSOArsiparisEnabled && strings.TrimSpace(cfg.SSOArsiparisClientID) == bspsClientID) ||
+				(cfg.SSOSijabuEnabled && strings.TrimSpace(cfg.SSOSijabuClientID) == bspsClientID) ||
+				(cfg.SSOKompuEnabled && strings.TrimSpace(cfg.SSOKompuClientID) == bspsClientID) {
+				return nil, fmt.Errorf("browser SSO client IDs must be unique")
+			}
+			if len(cfg.SSORealisasiBSPSRedirectURIs) == 0 {
+				return nil, fmt.Errorf("SSO_REALISASI_BSPS_REDIRECT_URIS is required when browser SSO is enabled")
+			}
+			if len(cfg.SSORealisasiBSPSPostLogoutURIs) == 0 {
+				return nil, fmt.Errorf("SSO_REALISASI_BSPS_POST_LOGOUT_REDIRECT_URIS is required when browser SSO is enabled")
+			}
+			if err := validateConfiguredHTTPURLs("SSO_REALISASI_BSPS_REDIRECT_URIS", cfg.SSORealisasiBSPSRedirectURIs); err != nil {
+				return nil, err
+			}
+			if err := validateConfiguredHTTPURLs("SSO_REALISASI_BSPS_POST_LOGOUT_REDIRECT_URIS", cfg.SSORealisasiBSPSPostLogoutURIs); err != nil {
+				return nil, err
+			}
+			if err := validateConfiguredHTTPURLs("PORTAL_REALISASI_BSPS_LAUNCH_URL", []string{cfg.PortalRealisasiBSPSLaunchURL}); err != nil {
 				return nil, err
 			}
 		}
