@@ -53,6 +53,14 @@ type Config struct {
 	SSOSijabuRedirectURIs           []string
 	SSOSijabuPostLogoutURIs         []string
 	PortalSijabuLaunchURL           string
+	SSOKompuEnabled                 bool
+	SSOKompuClientID                string
+	SSOKompuApplicationCode         string
+	SSOKompuAccessPolicy            string
+	SSOKompuIntrospectionSecret     string
+	SSOKompuRedirectURIs            []string
+	SSOKompuPostLogoutURIs          []string
+	PortalKompuLaunchURL            string
 
 	SupabaseURL       string
 	SupabasePublicKey string
@@ -115,6 +123,14 @@ func Load() (*Config, error) {
 		SSOSijabuRedirectURIs:           splitCSV(os.Getenv("SSO_SIJABU_REDIRECT_URIS")),
 		SSOSijabuPostLogoutURIs:         splitCSV(os.Getenv("SSO_SIJABU_POST_LOGOUT_REDIRECT_URIS")),
 		PortalSijabuLaunchURL:           strings.TrimSpace(getEnv("PORTAL_SIJABU_LAUNCH_URL", "https://bp3kpsumatera2.com/")),
+		SSOKompuEnabled:                 getEnvBool("SSO_KOMPU_ENABLED", false),
+		SSOKompuClientID:                strings.TrimSpace(getEnv("SSO_KOMPU_CLIENT_ID", "kompu-web")),
+		SSOKompuApplicationCode:         strings.TrimSpace(getEnv("SSO_KOMPU_APPLICATION_CODE", "kompu")),
+		SSOKompuAccessPolicy:            strings.ToUpper(strings.TrimSpace(getEnv("SSO_KOMPU_ACCESS_POLICY", "AUTO_USER"))),
+		SSOKompuIntrospectionSecret:     strings.TrimSpace(os.Getenv("SSO_KOMPU_INTROSPECTION_SECRET")),
+		SSOKompuRedirectURIs:            splitCSV(os.Getenv("SSO_KOMPU_REDIRECT_URIS")),
+		SSOKompuPostLogoutURIs:          splitCSV(os.Getenv("SSO_KOMPU_POST_LOGOUT_REDIRECT_URIS")),
+		PortalKompuLaunchURL:            strings.TrimSpace(os.Getenv("PORTAL_KOMPU_LAUNCH_URL")),
 
 		SupabaseURL: os.Getenv("SUPABASE_URL"),
 
@@ -245,6 +261,35 @@ func Load() (*Config, error) {
 				return nil, err
 			}
 			if err := validateConfiguredHTTPURLs("SSO_SIJABU_POST_LOGOUT_REDIRECT_URIS", cfg.SSOSijabuPostLogoutURIs); err != nil {
+				return nil, err
+			}
+		}
+		if cfg.SSOKompuEnabled {
+			if err := validateSSOClientSecurity("KOMPU", cfg.SSOKompuAccessPolicy, cfg.SSOKompuIntrospectionSecret); err != nil {
+				return nil, err
+			}
+			if strings.TrimSpace(cfg.SSOKompuClientID) == "" || strings.TrimSpace(cfg.SSOKompuApplicationCode) == "" {
+				return nil, fmt.Errorf("Kompu browser SSO client ID and application code are required")
+			}
+			kompuClientID := strings.TrimSpace(cfg.SSOKompuClientID)
+			if silapetClientID == kompuClientID || klinikClientID == kompuClientID ||
+				(cfg.SSOArsiparisEnabled && strings.TrimSpace(cfg.SSOArsiparisClientID) == kompuClientID) ||
+				(cfg.SSOSijabuEnabled && strings.TrimSpace(cfg.SSOSijabuClientID) == kompuClientID) {
+				return nil, fmt.Errorf("browser SSO client IDs must be unique")
+			}
+			if len(cfg.SSOKompuRedirectURIs) == 0 {
+				return nil, fmt.Errorf("SSO_KOMPU_REDIRECT_URIS is required when browser SSO is enabled")
+			}
+			if len(cfg.SSOKompuPostLogoutURIs) == 0 {
+				return nil, fmt.Errorf("SSO_KOMPU_POST_LOGOUT_REDIRECT_URIS is required when browser SSO is enabled")
+			}
+			if err := validateConfiguredHTTPURLs("SSO_KOMPU_REDIRECT_URIS", cfg.SSOKompuRedirectURIs); err != nil {
+				return nil, err
+			}
+			if err := validateConfiguredHTTPURLs("SSO_KOMPU_POST_LOGOUT_REDIRECT_URIS", cfg.SSOKompuPostLogoutURIs); err != nil {
+				return nil, err
+			}
+			if err := validateConfiguredHTTPURLs("PORTAL_KOMPU_LAUNCH_URL", []string{cfg.PortalKompuLaunchURL}); err != nil {
 				return nil, err
 			}
 		}

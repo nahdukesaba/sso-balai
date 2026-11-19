@@ -228,6 +228,16 @@ func main() {
 				PostLogoutRedirectURIs: cfg.SSOSijabuPostLogoutURIs,
 			})
 		}
+		if cfg.SSOKompuEnabled {
+			ssoClients = append(ssoClients, services.BrowserSSOClient{
+				ClientID:               cfg.SSOKompuClientID,
+				ApplicationCode:        cfg.SSOKompuApplicationCode,
+				AccessPolicy:           cfg.SSOKompuAccessPolicy,
+				IntrospectionSecret:    cfg.SSOKompuIntrospectionSecret,
+				RedirectURIs:           cfg.SSOKompuRedirectURIs,
+				PostLogoutRedirectURIs: cfg.SSOKompuPostLogoutURIs,
+			})
+		}
 
 		browserSSOService, err = services.NewBrowserSSOService(
 			browserSSORepository,
@@ -269,6 +279,16 @@ func main() {
 				cfg.PortalSijabuLaunchURL,
 			); err != nil {
 				log.Fatalf("failed to register sijabu portal card: %v", err)
+			}
+		}
+		if cfg.SSOKompuEnabled {
+			if err := accountPortalService.RegisterApplication(
+				cfg.SSOKompuApplicationCode,
+				"Kompu",
+				"Aplikasi Kompu BP3KP Sumatera II",
+				cfg.PortalKompuLaunchURL,
+			); err != nil {
+				log.Fatalf("failed to register kompu portal card: %v", err)
 			}
 		}
 
