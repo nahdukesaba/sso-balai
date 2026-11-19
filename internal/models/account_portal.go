@@ -13,6 +13,7 @@ type PortalApplicationCard struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	StatusLabel string `json:"statusLabel"`
+	StatusClass string `json:"statusClass"`
 	RoleLabel   string `json:"roleLabel"`
 	LaunchURL   string `json:"launchUrl"`
 	Launchable  bool   `json:"launchable"`

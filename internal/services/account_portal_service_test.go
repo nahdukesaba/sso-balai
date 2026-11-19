@@ -191,3 +191,27 @@ func TestPortalStatusLabelsMatchPortalCopy(t *testing.T) {
 		})
 	}
 }
+
+func TestPortalStatusClassesMatchDesignSystem(t *testing.T) {
+	tests := []struct {
+		name          string
+		status        string
+		hasMembership bool
+		want          string
+	}{
+		{name: "no membership", status: models.MembershipStatusApproved, want: "status-none"},
+		{name: "approved", status: models.MembershipStatusApproved, hasMembership: true, want: "status-active"},
+		{name: "pending", status: models.MembershipStatusPending, hasMembership: true, want: "status-pending"},
+		{name: "rejected", status: models.MembershipStatusRejected, hasMembership: true, want: "status-rejected"},
+		{name: "disabled", status: models.MembershipStatusDisabled, hasMembership: true, want: "status-disabled"},
+		{name: "unknown", status: "unknown", hasMembership: true, want: "status-none"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := portalStatusClass(test.status, test.hasMembership); got != test.want {
+				t.Fatalf("unexpected portal status class: got %q want %q", got, test.want)
+			}
+		})
+	}
+}
