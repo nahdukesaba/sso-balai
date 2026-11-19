@@ -226,12 +226,13 @@ func (r *UserRepository) CreateBootstrapUser(
 		`
 		INSERT INTO public.app_users (
 			id,
+			auth_user_id,
 			email,
 			full_name,
 			role,
 			status
 		)
-		VALUES ($1, $2, $3, $4, $5)
+		VALUES ($1, $1, $2, $3, $4, $5)
 		RETURNING `+userColumns,
 		id,
 		email,
