@@ -106,28 +106,33 @@ func (h *BrowserSSOHandler) AdminSSOPage(c *fiber.Ctx) error {
 	setAccountPortalPageHeaders(c)
 	c.Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'nonce-"+nonce+"'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 	var out strings.Builder
+	ssoOrigin := requestOrigin(c)
 	err = ssoAdminTemplate.Execute(&out, struct {
-		AdminName string
-		CSRF      string
-		Nonce     string
-		Tab       string
-		Search    string
-		Filter    string
-		Message   string
-		Error     string
-		Apps      []appRow
-		Users     []repository.SSOAdminUser
+		AdminName    string
+		CSRF         string
+		Nonce        string
+		Tab          string
+		Search       string
+		Filter       string
+		Message      string
+		Error        string
+		SSOOrigin    string
+		DocsMarkdown string
+		Apps         []appRow
+		Users        []repository.SSOAdminUser
 	}{
-		AdminName: adminName,
-		CSRF:      csrf,
-		Nonce:     nonce,
-		Tab:       normalizeAdminTab(c.Query("tab")),
-		Search:    search,
-		Filter:    filter,
-		Message:   strings.TrimSpace(c.Query("msg")),
-		Error:     strings.TrimSpace(c.Query("err")),
-		Apps:      appRows,
-		Users:     users,
+		AdminName:    adminName,
+		CSRF:         csrf,
+		Nonce:        nonce,
+		Tab:          normalizeAdminTab(c.Query("tab")),
+		Search:       search,
+		Filter:       filter,
+		Message:      strings.TrimSpace(c.Query("msg")),
+		Error:        strings.TrimSpace(c.Query("err")),
+		SSOOrigin:    ssoOrigin,
+		DocsMarkdown: buildSSOIntegrationMarkdown(ssoOrigin),
+		Apps:         appRows,
+		Users:        users,
 	})
 	if err != nil {
 		return err
@@ -606,10 +611,14 @@ func verifyAdminCSRF(c *fiber.Ctx) bool {
 }
 
 func normalizeAdminTab(raw string) string {
-	if strings.EqualFold(strings.TrimSpace(raw), "users") {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "users":
 		return "users"
+	case "docs", "documentation":
+		return "docs"
+	default:
+		return "apps"
 	}
-	return "apps"
 }
 
 func splitTrimmedCSV(raw string) []string {
@@ -699,6 +708,12 @@ main{width:100%;max-width:none;padding:1.5rem 1.75rem 3rem}
 .admin-content{min-width:0}
 .page-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:1rem;margin-bottom:1.25rem}
 .page-head h1{margin:0}
+.doc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(16rem,1fr));gap:1rem;margin-bottom:1.25rem}
+.doc-step{padding:1.1rem 1.2rem;border:1px solid var(--line);border-radius:.85rem;background:#f8fafc}
+.doc-step-num{display:inline-flex;align-items:center;justify-content:center;width:1.65rem;height:1.65rem;border-radius:999px;background:var(--accent);color:#fff;font-size:.78rem;font-weight:700;margin-bottom:.55rem}
+.doc-step h3{margin:0 0 .35rem;font-size:.95rem}
+.doc-step p{margin:0;font-size:.83rem;color:var(--muted);line-height:1.45}
+.code-pre{margin:0;padding:1.1rem 1.25rem;border-radius:.85rem;background:#0f172a;color:#f8fafc;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:.8rem;line-height:1.55;overflow-x:auto;white-space:pre-wrap;word-break:break-word;max-height:38rem;overflow-y:auto}
 @media(max-width:860px){.admin-shell{grid-template-columns:1fr}.admin-sidebar{position:static;min-height:auto}.side-sep{margin:.85rem 0 .65rem;padding-top:0}}
 `
 
@@ -709,6 +724,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
     <nav class="side-nav">
       <a class="side-link {{if eq .Tab "apps"}}active{{end}}" href="/admin/sso?tab=apps"><span>Aplikasi &amp; Client SSO</span><span class="side-badge">{{len .Apps}}</span></a>
       <a class="side-link {{if eq .Tab "users"}}active{{end}}" href="/admin/sso?tab=users"><span>Pengguna &amp; Role Admin</span></a>
+      <a class="side-link {{if eq .Tab "docs"}}active{{end}}" href="/admin/sso?tab=docs"><span>Documentation</span></a>
     </nav>
     <div class="side-sep"></div>
     <nav class="side-nav" aria-label="Tautan Cepat">
@@ -721,6 +737,9 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
         {{if eq .Tab "apps"}}
         <h1>Aplikasi &amp; Client SSO</h1>
         <p class="lead">Kelola daftar website terhubung dan konfigurasi OAuth/SSO tanpa restart server.</p>
+        {{else if eq .Tab "docs"}}
+        <h1>Documentation</h1>
+        <p class="lead">Panduan lengkap integrasi SSO &amp; Universal App Launcher — siap di-download sebagai <code>.md</code> untuk diberikan ke AI Assistant atau developer.</p>
         {{else}}
         <h1>Pengguna &amp; Role Admin</h1>
         <p class="lead">Semua pengguna otomatis mendapat role User; atur role Admin per aplikasi di sini.</p>
@@ -729,6 +748,11 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
       {{if eq .Tab "apps"}}
       <div class="tab-actions">
         <button type="button" id="open-app-modal-btn" class="button">+ Tambah / Perbarui Aplikasi SSO</button>
+      </div>
+      {{else if eq .Tab "docs"}}
+      <div class="tab-actions">
+        <button type="button" id="copy-docs-md-btn" class="button secondary sm">Salin Markdown (.md)</button>
+        <a class="button sm" href="/admin/sso/docs.md" download="SSO_BP3KP_INTEGRATION_GUIDE.md">Download .md</a>
       </div>
       {{else}}
       <div class="tab-actions">
@@ -822,6 +846,47 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
       </tbody>
     </table>
   </div>
+</section>
+{{else if eq .Tab "docs"}}
+<section class="panel-box">
+  <h2 style="margin-bottom:.4rem">Alur Cepat Integrasi SSO &amp; App Launcher</h2>
+  <p class="muted" style="margin-bottom:1.1rem">Cukup klik <strong>Download .md</strong> di kanan atas lalu unggah file <code>SSO_BP3KP_INTEGRATION_GUIDE.md</code> ke AI Coding Assistant (Cursor / Antigravity / Claude / ChatGPT) di project website target Anda.</p>
+  <div class="doc-grid">
+    <div class="doc-step">
+      <div class="doc-step-num">1</div>
+      <h3>Daftarkan Aplikasi di SSO</h3>
+      <p>Buka menu <strong>Aplikasi &amp; Client SSO</strong>, isi <code>Code</code>, <code>Client ID</code>, <code>Launch URL</code>, <code>Redirect URIs</code> (URL callback), serta logo aplikasi.</p>
+    </div>
+    <div class="doc-step">
+      <div class="doc-step-num">2</div>
+      <h3>Redirect Login (PKCE S256)</h3>
+      <p>Buat <code>state</code> &amp; <code>code_verifier</code>, hitung <code>code_challenge</code> (SHA-256 base64url), lalu arahkan user ke <code>{{.SSOOrigin}}/authorize</code>.</p>
+    </div>
+    <div class="doc-step">
+      <div class="doc-step-num">3</div>
+      <h3>Callback &amp; Token Exchange</h3>
+      <p>Terima <code>code</code> di URL callback, kirim <code>POST {{.SSOOrigin}}/api/v1/auth/sso/exchange</code> untuk menerima profil user dan role (<code>user</code> / <code>admin</code>).</p>
+    </div>
+    <div class="doc-step">
+      <div class="doc-step-num">4</div>
+      <h3>Pasang Universal App Launcher</h3>
+      <p>Tambahkan tag <code>&lt;bp3kp-app-switcher&gt;</code> dan script <code>{{.SSOOrigin}}/widget/app-switcher.js</code> di navbar website target.</p>
+    </div>
+  </div>
+</section>
+
+<section class="panel-box">
+  <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.85rem">
+    <div>
+      <h2 style="margin:0">Isi File <code>SSO_BP3KP_INTEGRATION_GUIDE.md</code> (Siap Upload ke AI)</h2>
+      <p class="muted" style="margin:.2rem 0 0;font-size:.82rem">Dokumen ini sudah berisi instruksi sistem untuk AI, spesifikasi endpoint, contoh kode TypeScript/React/HTML, dan checklist verifikasi.</p>
+    </div>
+    <div style="display:flex;gap:.5rem">
+      <button type="button" id="copy-docs-md-btn-2" class="button secondary sm">Salin Isi .md</button>
+      <a class="button sm" href="/admin/sso/docs.md" download="SSO_BP3KP_INTEGRATION_GUIDE.md">Download .md</a>
+    </div>
+  </div>
+  <pre id="docs-md-source" class="code-pre">{{.DocsMarkdown}}</pre>
 </section>
 {{else}}
 <dialog id="modal-create-user" class="sso-modal" aria-labelledby="modal-create-user-title">
@@ -1199,6 +1264,20 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
     btn.addEventListener('click', function(){
       var dlg = document.getElementById(btn.getAttribute('data-close-modal'));
       if(dlg && dlg.close) dlg.close();
+    });
+  });
+  var mdPre = document.getElementById('docs-md-source');
+  ['copy-docs-md-btn', 'copy-docs-md-btn-2'].forEach(function(id){
+    var b = document.getElementById(id);
+    if(!b || !mdPre) return;
+    b.addEventListener('click', function(){
+      var orig = b.textContent;
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(mdPre.textContent || '').then(function(){
+          b.textContent = 'Tersalin!';
+          setTimeout(function(){ b.textContent = orig; }, 1800);
+        });
+      }
     });
   });
 })();

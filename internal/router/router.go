@@ -38,6 +38,7 @@ func Register(
 		app.Get("/widget/default-logo.png", browserSSOHandler.DefaultLogoPNG)
 		app.Get("/widget/app-switcher.js", browserSSOHandler.AppSwitcherWidgetJS)
 		app.Get("/admin/sso", browserSSOHandler.AdminSSOPage)
+		app.Get("/admin/sso/docs.md", browserSSOHandler.AdminSSODownloadDocsMD)
 		app.Post("/admin/sso/apps", browserSSOHandler.AdminSSOSaveApp)
 		app.Post("/admin/sso/apps/delete", browserSSOHandler.AdminSSODeleteApp)
 		app.Post("/admin/sso/memberships", browserSSOHandler.AdminSSOSaveMembership)
