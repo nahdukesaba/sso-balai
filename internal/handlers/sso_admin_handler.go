@@ -117,6 +117,7 @@ func (h *BrowserSSOHandler) AdminSSOPage(c *fiber.Ctx) error {
 		Message      string
 		Error        string
 		SSOOrigin    string
+		DocsTemplate string
 		DocsMarkdown string
 		Apps         []appRow
 		Users        []repository.SSOAdminUser
@@ -130,6 +131,7 @@ func (h *BrowserSSOHandler) AdminSSOPage(c *fiber.Ctx) error {
 		Message:      strings.TrimSpace(c.Query("msg")),
 		Error:        strings.TrimSpace(c.Query("err")),
 		SSOOrigin:    ssoOrigin,
+		DocsTemplate: buildSSOIntegrationMarkdownTemplate(ssoOrigin),
 		DocsMarkdown: buildSSOIntegrationMarkdown(ssoOrigin),
 		Apps:         appRows,
 		Users:        users,
@@ -708,8 +710,9 @@ main{width:100%;max-width:none;padding:1.5rem 1.75rem 3rem}
 .admin-content{min-width:0}
 .page-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:1rem;margin-bottom:1.25rem}
 .page-head h1{margin:0}
-.doc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(16rem,1fr));gap:1rem;margin-bottom:1.25rem}
-.doc-step{padding:1.1rem 1.2rem;border:1px solid var(--line);border-radius:.85rem;background:#f8fafc}
+.doc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15.5rem,1fr));gap:1rem;margin-bottom:1.25rem}
+.doc-step{padding:1.1rem 1.2rem;border:1px solid var(--line);border-radius:.85rem;background:#f8fafc;min-width:0;overflow-wrap:anywhere;word-break:break-word}
+.doc-step code{word-break:break-all;font-size:.78rem}
 .doc-step-num{display:inline-flex;align-items:center;justify-content:center;width:1.65rem;height:1.65rem;border-radius:999px;background:var(--accent);color:#fff;font-size:.78rem;font-weight:700;margin-bottom:.55rem}
 .doc-step h3{margin:0 0 .35rem;font-size:.95rem}
 .doc-step p{margin:0;font-size:.83rem;color:var(--muted);line-height:1.45}
@@ -749,12 +752,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
       <div class="tab-actions">
         <button type="button" id="open-app-modal-btn" class="button">+ Tambah / Perbarui Aplikasi SSO</button>
       </div>
-      {{else if eq .Tab "docs"}}
-      <div class="tab-actions">
-        <button type="button" id="copy-docs-md-btn" class="button secondary sm">Salin Markdown (.md)</button>
-        <a class="button sm" href="/admin/sso/docs.md" download="SSO_BP3KP_INTEGRATION_GUIDE.md">Download .md</a>
-      </div>
-      {{else}}
+      {{else if eq .Tab "users"}}
       <div class="tab-actions">
         <button type="button" id="open-bulk-import-btn" class="button secondary sm">Bulk Import CSV</button>
         <button type="button" id="open-create-user-btn" class="button sm">+ Tambah User</button>
@@ -850,7 +848,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
 {{else if eq .Tab "docs"}}
 <section class="panel-box">
   <h2 style="margin-bottom:.4rem">Alur Cepat Integrasi SSO &amp; App Launcher</h2>
-  <p class="muted" style="margin-bottom:1.1rem">Cukup klik <strong>Download .md</strong> di kanan atas lalu unggah file <code>SSO_BP3KP_INTEGRATION_GUIDE.md</code> ke AI Coding Assistant (Cursor / Antigravity / Claude / ChatGPT) di project website target Anda.</p>
+  <p class="muted" style="margin-bottom:1.1rem">Pilih website terdaftar pada bagian <strong>Master Prompt</strong> di bawah agar <code>Client ID</code>, <code>Code</code>, dan <code>Redirect URI</code> langsung terisi otomatis, lalu salin atau download file <code>.md</code>-nya untuk diberikan ke AI Coding Assistant.</p>
   <div class="doc-grid">
     <div class="doc-step">
       <div class="doc-step-num">1</div>
@@ -860,17 +858,17 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
     <div class="doc-step">
       <div class="doc-step-num">2</div>
       <h3>Redirect Login (PKCE S256)</h3>
-      <p>Buat <code>state</code> &amp; <code>code_verifier</code>, hitung <code>code_challenge</code> (SHA-256 base64url), lalu arahkan user ke <code>{{.SSOOrigin}}/authorize</code>.</p>
+      <p>Buat <code>state</code> &amp; <code>code_verifier</code>, hitung <code>code_challenge</code> (SHA-256 base64url), lalu arahkan user ke <code>/authorize</code> di server SSO.</p>
     </div>
     <div class="doc-step">
       <div class="doc-step-num">3</div>
       <h3>Callback &amp; Token Exchange</h3>
-      <p>Terima <code>code</code> di URL callback, kirim <code>POST {{.SSOOrigin}}/api/v1/auth/sso/exchange</code> untuk menerima profil user dan role (<code>user</code> / <code>admin</code>).</p>
+      <p>Terima <code>code</code> di URL callback, kirim <code>POST /api/v1/auth/sso/exchange</code> untuk menerima profil user dan role (<code>user</code> / <code>admin</code>).</p>
     </div>
     <div class="doc-step">
       <div class="doc-step-num">4</div>
       <h3>Pasang Universal App Launcher</h3>
-      <p>Tambahkan tag <code>&lt;bp3kp-app-switcher&gt;</code> dan script <code>{{.SSOOrigin}}/widget/app-switcher.js</code> di navbar website target.</p>
+      <p>Tambahkan tag <code>&lt;bp3kp-app-switcher&gt;</code> dan script <code>/widget/app-switcher.js</code> di navbar website target.</p>
     </div>
   </div>
 </section>
@@ -878,15 +876,26 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
 <section class="panel-box">
   <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.85rem">
     <div>
-      <h2 style="margin:0">Isi File <code>SSO_BP3KP_INTEGRATION_GUIDE.md</code> (Siap Upload ke AI)</h2>
-      <p class="muted" style="margin:.2rem 0 0;font-size:.82rem">Dokumen ini sudah berisi instruksi sistem untuk AI, spesifikasi endpoint, contoh kode TypeScript/React/HTML, dan checklist verifikasi.</p>
+      <h2 style="margin:0">Master Prompt</h2>
+      <p class="muted" style="margin:.2rem 0 0;font-size:.82rem">Pilih website terdaftar agar <code>Client ID</code>, <code>Code</code>, <code>Launch URL</code>, dan <code>Redirect URI</code> otomatis terpasang di Master Prompt.</p>
     </div>
-    <div style="display:flex;gap:.5rem">
-      <button type="button" id="copy-docs-md-btn-2" class="button secondary sm">Salin Isi .md</button>
-      <a class="button sm" href="/admin/sso/docs.md" download="SSO_BP3KP_INTEGRATION_GUIDE.md">Download .md</a>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:.5rem">
+      <select id="docs-app-select" aria-label="Pilih Website Terdaftar" style="width:auto;margin-top:0;padding:.42rem .75rem;font-size:.83rem;font-weight:600">
+        {{range .Apps}}
+        <option value="{{.Code}}"
+          data-code="{{.Code}}"
+          data-name="{{.Name}}"
+          data-client-id="{{if .ClientID}}{{.ClientID}}{{else}}{{.Code}}-web{{end}}"
+          data-launch-url="{{if .LaunchURL}}{{.LaunchURL}}{{else}}https://{{.Code}}.bp3kpsumatera2.com/{{end}}"
+          data-redirect-uri="{{if .RedirectURIs}}{{index .RedirectURIs 0}}{{else}}{{if .LaunchURL}}{{.LaunchURL}}{{else}}https://{{.Code}}.bp3kpsumatera2.com/{{end}}auth/sso/callback{{end}}"
+          data-logout-uri="{{if .PostLogoutRedirectURIs}}{{index .PostLogoutRedirectURIs 0}}{{else}}{{if .LaunchURL}}{{.LaunchURL}}{{else}}https://{{.Code}}.bp3kpsumatera2.com/{{end}}{{end}}">{{.Name}} ({{if .ClientID}}{{.ClientID}}{{else}}{{.Code}}-web{{end}})</option>
+        {{end}}
+      </select>
+      <button type="button" id="copy-docs-md-btn-2" class="button secondary sm">Salin Master Prompt</button>
+      <a id="download-docs-md-link" class="button sm" href="/admin/sso/docs.md">Download .md</a>
     </div>
   </div>
-  <pre id="docs-md-source" class="code-pre">{{.DocsMarkdown}}</pre>
+  <pre id="docs-md-source" class="code-pre" data-template="{{.DocsTemplate}}">{{.DocsMarkdown}}</pre>
 </section>
 {{else}}
 <dialog id="modal-create-user" class="sso-modal" aria-labelledby="modal-create-user-title">
@@ -1267,7 +1276,36 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
     });
   });
   var mdPre = document.getElementById('docs-md-source');
-  ['copy-docs-md-btn', 'copy-docs-md-btn-2'].forEach(function(id){
+  var appSelect = document.getElementById('docs-app-select');
+  var dlLink = document.getElementById('download-docs-md-link');
+  function syncMasterPrompt(){
+    if(!mdPre || !appSelect || appSelect.selectedIndex < 0) return;
+    var opt = appSelect.options[appSelect.selectedIndex];
+    var tpl = mdPre.getAttribute('data-template') || '';
+    if(!opt || !tpl) return;
+    var code = opt.getAttribute('data-code') || 'arsiparis';
+    var name = opt.getAttribute('data-name') || code;
+    var clientId = opt.getAttribute('data-client-id') || (code + '-web');
+    var launchUrl = opt.getAttribute('data-launch-url') || '';
+    var redirectUri = opt.getAttribute('data-redirect-uri') || '';
+    var logoutUri = opt.getAttribute('data-logout-uri') || launchUrl;
+    var filled = tpl
+      .split('__APP_CODE__').join(code)
+      .split('__APP_NAME__').join(name)
+      .split('__CLIENT_ID__').join(clientId)
+      .split('__LAUNCH_URL__').join(launchUrl)
+      .split('__REDIRECT_URI__').join(redirectUri)
+      .split('__LOGOUT_URI__').join(logoutUri);
+    mdPre.textContent = filled;
+    if(dlLink){
+      dlLink.href = '/admin/sso/docs.md?app=' + encodeURIComponent(code);
+    }
+  }
+  if(appSelect){
+    appSelect.addEventListener('change', syncMasterPrompt);
+    syncMasterPrompt();
+  }
+  ['copy-docs-md-btn-2'].forEach(function(id){
     var b = document.getElementById(id);
     if(!b || !mdPre) return;
     b.addEventListener('click', function(){
