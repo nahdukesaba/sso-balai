@@ -663,7 +663,7 @@ th{font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mu
 .topbar-inner{width:100%;max-width:none;padding:0 1.75rem}
 main{width:100%;max-width:none;padding:1.5rem 1.75rem 3rem}
 .admin-shell{display:grid;grid-template-columns:14.5rem minmax(0,1fr);gap:1.5rem;align-items:start}
-.admin-sidebar{position:sticky;top:1.25rem;background:#fff;border:1px solid var(--line);border-radius:1rem;padding:1rem;box-shadow:var(--shadow)}
+.admin-sidebar{position:sticky;top:5rem;min-height:calc(100vh - 6.75rem);display:flex;flex-direction:column;background:#fff;border:1px solid var(--line);border-radius:1rem;padding:1rem;box-shadow:var(--shadow)}
 .side-title{font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:.2rem .65rem .65rem}
 .side-nav{display:flex;flex-direction:column;gap:.3rem}
 .side-link{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.62rem .8rem;border-radius:.65rem;text-decoration:none;font-size:.88rem;font-weight:600;color:var(--muted);transition:background .15s,color .15s}
@@ -671,11 +671,11 @@ main{width:100%;max-width:none;padding:1.5rem 1.75rem 3rem}
 .side-link.active{background:var(--accent);color:#fff}
 .side-badge{font-size:.72rem;font-weight:700;padding:.12rem .48rem;border-radius:999px;background:rgba(15,23,42,.08);color:inherit}
 .side-link.active .side-badge{background:rgba(255,255,255,.22);color:#fff}
-.side-sep{border-top:1px solid var(--line);margin:.85rem 0 .65rem}
+.side-sep{border-top:1px solid var(--line);margin-top:auto;padding-top:.65rem}
 .admin-content{min-width:0}
 .page-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:1rem;margin-bottom:1.25rem}
 .page-head h1{margin:0}
-@media(max-width:860px){.admin-shell{grid-template-columns:1fr}.admin-sidebar{position:static}}
+@media(max-width:860px){.admin-shell{grid-template-columns:1fr}.admin-sidebar{position:static;min-height:auto}.side-sep{margin:.85rem 0 .65rem;padding-top:0}}
 `
 
 var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Pusat SSO - BP3KP Sumatera II</title>` + accountPortalFavicon + `<style>` + ssoAdminStyles + `</style></head><body>` + accountPortalBrandHeader + `<div class="user-nav"><a class="button secondary sm" href="/">Portal Aplikasi</a><span class="user-chip"><span class="avatar" aria-hidden="true">A</span>{{.AdminName}}</span><a class="button secondary sm" href="/logout?portal=1&immediate=1">Keluar</a></div></div></header><main>
