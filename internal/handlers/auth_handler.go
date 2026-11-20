@@ -870,6 +870,9 @@ func (h *AuthHandler) ApplicationContext(c *fiber.Ctx) error {
 
 	applicationCode := strings.TrimSpace(c.Query("application"))
 	if applicationCode == "" {
+		applicationCode = strings.TrimSpace(c.Query("app"))
+	}
+	if applicationCode == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":   "validation_error",
 			"message": "Parameter application wajib diisi.",

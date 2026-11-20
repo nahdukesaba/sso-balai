@@ -329,6 +329,10 @@ func (h *BrowserSSOHandler) Exchange(c *fiber.Ctx) error {
 	if h.portalService != nil && result.Identity != nil && result.Identity.User != nil {
 		apps = h.portalService.UserApplications(c.UserContext(), result.Identity.User.ID)
 	}
+	role := "user"
+	if result.Application != nil && strings.TrimSpace(result.Application.Role) != "" {
+		role = strings.ToLower(strings.TrimSpace(result.Application.Role))
+	}
 	return c.JSON(fiber.Map{
 		"accessToken":  result.Session.AccessToken,
 		"refreshToken": result.Session.RefreshToken,
@@ -336,6 +340,7 @@ func (h *BrowserSSOHandler) Exchange(c *fiber.Ctx) error {
 		"expiresIn":    result.Session.ExpiresIn,
 		"expiresAt":    result.Session.ExpiresAt,
 		"sid":          result.SSOSessionID,
+		"role":         role,
 		"user":         result.Identity.User,
 		"applications": apps,
 	})

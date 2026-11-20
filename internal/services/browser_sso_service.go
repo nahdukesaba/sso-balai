@@ -582,6 +582,7 @@ func (s *BrowserSSOService) Exchange(
 	return &models.LoginResult{
 		Session:      supabaseSession,
 		Identity:     identity,
+		Application:  application,
 		SSOSessionID: browserSession.ID,
 	}, nil
 }
