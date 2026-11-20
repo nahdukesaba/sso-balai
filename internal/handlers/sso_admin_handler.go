@@ -608,6 +608,7 @@ th{font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mu
 .bulk-fields{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .bulk-fields[hidden]{display:none}
 .sso-modal{border:1px solid var(--line);border-radius:1rem;padding:0;width:min(44rem,calc(100% - 2rem));max-height:calc(100vh - 2rem);box-shadow:0 24px 48px rgba(15,23,42,.22);background:#fff;margin:auto}
+.sso-modal.sso-modal-lg{width:min(56rem,calc(100% - 2rem))}
 .sso-modal::backdrop{background:rgba(15,23,42,.48);backdrop-filter:blur(2px)}
 .modal-head{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:1rem 1.25rem;border-bottom:1px solid var(--line);background:#f8fafc}
 .modal-head h3{margin:0;font-size:1rem;font-weight:700}
@@ -623,7 +624,11 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
     <a class="tab {{if eq .Tab "apps"}}active{{end}}" href="/admin/sso?tab=apps">Aplikasi &amp; Client SSO</a>
     <a class="tab {{if eq .Tab "users"}}active{{end}}" href="/admin/sso?tab=users">Pengguna, Role &amp; Approval</a>
   </nav>
-  {{if eq .Tab "users"}}
+  {{if eq .Tab "apps"}}
+  <div class="tab-actions">
+    <button type="button" id="open-app-modal-btn" class="button">+ Tambah / Perbarui Aplikasi SSO</button>
+  </div>
+  {{else}}
   <div class="tab-actions">
     <button type="button" id="open-bulk-import-btn" class="button secondary sm">Bulk Import CSV</button>
     <button type="button" id="open-create-user-btn" class="button sm">+ Tambah User</button>
@@ -634,25 +639,33 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
 {{if .Error}}<div class="alert err" role="alert">{{.Error}}</div>{{end}}
 
 {{if eq .Tab "apps"}}
-<section class="panel-box">
-  <h2>Tambah / Perbarui Aplikasi SSO</h2>
-  <p class="muted" style="margin-bottom:1rem">Isi <strong>Code</strong> yang sama jika ingin memperbarui aplikasi yang sudah ada. Perubahan langsung aktif tanpa restart.</p>
-  <form method="post" action="/admin/sso/apps">
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <div class="form-grid">
-      <div><label for="app-code">Code (unik, huruf kecil)</label><input id="app-code" name="code" placeholder="mis. arsip" required></div>
-      <div><label for="app-name">Nama Aplikasi</label><input id="app-name" name="name" placeholder="mis. Arsip Digital" required></div>
-      <div><label for="app-client-id">Client ID</label><input id="app-client-id" name="client_id" placeholder="mis. arsip-web" required></div>
-      <div><label for="app-policy">Kebijakan Akses</label><select id="app-policy" name="access_policy"><option value="AUTO_USER">AUTO_USER (otomatis/approval)</option><option value="RESTRICTED">RESTRICTED (khusus yang disetujui)</option></select></div>
-      <div class="full"><label for="app-launch">Launch URL (URL utama web)</label><input id="app-launch" name="launch_url" type="url" placeholder="https://arsip.bp3kpsumatera2.com/" required></div>
-      <div class="full"><label for="app-redirects">Redirect URIs (pisahkan dengan koma)</label><input id="app-redirects" name="redirect_uris" placeholder="https://arsip.bp3kpsumatera2.com/auth/sso/callback, http://localhost:8080/auth/sso/callback" required></div>
-      <div class="full"><label for="app-logout">Post-Logout Redirect URIs (opsional, pisahkan koma)</label><input id="app-logout" name="post_logout_redirect_uris" placeholder="https://arsip.bp3kpsumatera2.com/"></div>
-      <div class="full"><label for="app-desc">Deskripsi Singkat</label><input id="app-desc" name="description" placeholder="Portal pengelolaan arsip resmi BP3KP Sumatera II"></div>
-      <div class="full"><label class="check-row"><input type="checkbox" name="is_active" checked> Aplikasi Aktif di SSO</label></div>
-    </div>
-    <button class="button" type="submit" style="margin-top:1.1rem">Simpan &amp; Aktifkan Aplikasi</button>
-  </form>
-</section>
+<dialog id="modal-app-form" class="sso-modal sso-modal-lg" aria-labelledby="modal-app-form-title">
+  <div class="modal-head">
+    <h3 id="modal-app-form-title">Tambah / Perbarui Aplikasi SSO</h3>
+    <button type="button" class="modal-close" data-close-modal="modal-app-form" aria-label="Tutup">&times;</button>
+  </div>
+  <div class="modal-body">
+    <p class="muted" style="margin-bottom:1rem">Isi <strong>Code</strong> yang sama jika ingin memperbarui aplikasi yang sudah ada. Perubahan langsung aktif tanpa restart.</p>
+    <form method="post" action="/admin/sso/apps">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <div class="form-grid">
+        <div><label for="app-code">Code (unik, huruf kecil)</label><input id="app-code" name="code" placeholder="mis. arsip" required></div>
+        <div><label for="app-name">Nama Aplikasi</label><input id="app-name" name="name" placeholder="mis. Arsip Digital" required></div>
+        <div><label for="app-client-id">Client ID</label><input id="app-client-id" name="client_id" placeholder="mis. arsip-web" required></div>
+        <div><label for="app-policy">Kebijakan Akses</label><select id="app-policy" name="access_policy"><option value="AUTO_USER">AUTO_USER (otomatis/approval)</option><option value="RESTRICTED">RESTRICTED (khusus yang disetujui)</option></select></div>
+        <div class="full"><label for="app-launch">Launch URL (URL utama web)</label><input id="app-launch" name="launch_url" type="url" placeholder="https://arsip.bp3kpsumatera2.com/" required></div>
+        <div class="full"><label for="app-redirects">Redirect URIs (pisahkan dengan koma)</label><input id="app-redirects" name="redirect_uris" placeholder="https://arsip.bp3kpsumatera2.com/auth/sso/callback, http://localhost:8080/auth/sso/callback" required></div>
+        <div class="full"><label for="app-logout">Post-Logout Redirect URIs (opsional, pisahkan koma)</label><input id="app-logout" name="post_logout_redirect_uris" placeholder="https://arsip.bp3kpsumatera2.com/"></div>
+        <div class="full"><label for="app-desc">Deskripsi Singkat</label><input id="app-desc" name="description" placeholder="Portal pengelolaan arsip resmi BP3KP Sumatera II"></div>
+        <div class="full"><label class="check-row"><input type="checkbox" name="is_active" checked> Aplikasi Aktif di SSO</label></div>
+      </div>
+      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.1rem">
+        <button type="button" class="button secondary" data-close-modal="modal-app-form">Batal</button>
+        <button class="button" type="submit">Simpan &amp; Aktifkan Aplikasi</button>
+      </div>
+    </form>
+  </div>
+</dialog>
 
 <section class="panel-box">
   <h2 style="margin-bottom:1rem">Daftar Aplikasi Terdaftar ({{len .Apps}})</h2>
@@ -963,7 +976,11 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
       memFields.hidden = actionSel.value === 'delete';
     });
   }
-
+})();
+</script>
+{{end}}
+<script nonce="{{.Nonce}}">
+(function(){
   function bindModal(btnId, modalId){
     var btn = document.getElementById(btnId);
     var dlg = document.getElementById(modalId);
@@ -973,6 +990,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
       if(e.target === dlg) dlg.close();
     });
   }
+  bindModal('open-app-modal-btn', 'modal-app-form');
   bindModal('open-create-user-btn', 'modal-create-user');
   bindModal('open-bulk-import-btn', 'modal-bulk-import');
   Array.prototype.slice.call(document.querySelectorAll('[data-close-modal]')).forEach(function(btn){
@@ -983,5 +1001,4 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
   });
 })();
 </script>
-{{end}}
 </main></body></html>`))
