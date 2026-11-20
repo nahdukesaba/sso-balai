@@ -618,6 +618,8 @@ th{font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mu
 .modal-close{border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:.5rem;width:2rem;height:2rem;font-size:1.15rem;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
 .modal-close:hover{background:#f1f5f9;color:#0f172a}
 .modal-body{padding:1.25rem;overflow-y:auto;max-height:calc(100vh - 7rem)}
+.users-table td{vertical-align:middle}
+.row-actions{display:flex;gap:.35rem;justify-content:flex-end;align-items:center;white-space:nowrap}
 `
 
 var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Pusat SSO - BP3KP Sumatera II</title>` + accountPortalFavicon + `<style>` + ssoAdminStyles + `</style></head><body>` + accountPortalBrandHeader + `<div class="user-nav"><a class="button secondary sm" href="/">Portal Aplikasi</a><span class="user-chip"><span class="avatar" aria-hidden="true">A</span>{{.AdminName}}</span><a class="button secondary sm" href="/logout?portal=1&immediate=1">Keluar</a></div></div></header><main>
@@ -743,16 +745,15 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
 </dialog>
 
 <section id="users-section" class="panel-box">
-  <h2 style="margin-bottom:.75rem">Daftar Pengguna, CRUD &amp; Aksi Massal ({{len .Users}})</h2>
-  <form method="get" action="/admin/sso" class="search-bar">
+  <h2 style="margin-bottom:.75rem">Daftar Pengguna (<span id="visible-user-count">{{len .Users}}</span>)</h2>
+  <form id="user-filter-form" method="get" action="/admin/sso" class="search-bar">
     <input type="hidden" name="tab" value="users">
-    <input name="q" value="{{.Search}}" placeholder="Cari nama atau email pegawai...">
-    <select name="filter" aria-label="Filter Status User">
+    <input id="live-search-input" name="q" value="{{.Search}}" placeholder="Cari nama atau email pegawai..." autocomplete="off">
+    <select id="user-filter-select" name="filter" aria-label="Filter Status User">
       <option value="active" {{if eq .Filter "active"}}selected{{end}}>User Aktif</option>
       <option value="deleted" {{if eq .Filter "deleted"}}selected{{end}}>User Terhapus</option>
       <option value="all" {{if eq .Filter "all"}}selected{{end}}>Semua User</option>
     </select>
-    <button class="button secondary" type="submit">Filter</button>
     <button type="button" id="toggle-select-btn" class="button secondary">Pilih</button>
   </form>
 
@@ -781,12 +782,12 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
   </form>
 
   <div class="table-wrap">
-    <table>
-      <thead><tr><th class="select-col"><input type="checkbox" id="select-all-cb" title="Pilih Semua" aria-label="Pilih Semua"></th><th>Pegawai &amp; Kelola</th><th>Admin Pusat</th><th>Role Aplikasi (Default: User)</th></tr></thead>
-      <tbody>
+    <table class="users-table">
+      <thead><tr><th class="select-col"><input type="checkbox" id="select-all-cb" title="Pilih Semua" aria-label="Pilih Semua"></th><th>Pengguna</th><th>Admin Pusat</th><th>Role Aplikasi</th><th style="text-align:right">Aksi</th></tr></thead>
+      <tbody id="users-tbody">
         {{range .Users}}
         {{$uid := .ID}}
-        <tr>
+        <tr class="user-row" data-search="{{.FullName}} {{.Email}} {{.Phone}}">
           <td class="select-col">
             {{if not .IsDeleted}}
             <input type="checkbox" class="user-cb" form="bulk-form" name="user_ids" value="{{$uid}}" aria-label="Pilih {{.FullName}}">
@@ -796,39 +797,6 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
             <strong>{{.FullName}}</strong>
             {{if .IsDeleted}}<span class="pill disabled">Terhapus</span>{{end}}
             <div class="muted" style="font-size:.78rem">{{.Email}}{{if .Phone}} · {{.Phone}}{{end}}</div>
-            <div class="user-actions">
-              {{if .IsDeleted}}
-              <form method="post" action="/admin/sso/users/restore" class="inline-form">
-                <input type="hidden" name="csrf" value="{{$.CSRF}}">
-                <input type="hidden" name="app_user_id" value="{{$uid}}">
-                <input type="hidden" name="q" value="{{$.Search}}">
-                <button class="button secondary sm" type="submit">Pulihkan</button>
-              </form>
-              {{else}}
-              <details>
-                <summary class="button secondary sm" style="display:inline-flex">Edit / Reset Password</summary>
-                <form method="post" action="/admin/sso/users/update" class="edit-box">
-                  <input type="hidden" name="csrf" value="{{$.CSRF}}">
-                  <input type="hidden" name="app_user_id" value="{{$uid}}">
-                  <input type="hidden" name="q" value="{{$.Search}}">
-                  <input type="hidden" name="filter" value="{{$.Filter}}">
-                  <label>Nama Lengkap</label>
-                  <input name="full_name" value="{{.FullName}}" required>
-                  <label>No. HP</label>
-                  <input name="phone" value="{{.Phone}}">
-                  <label>Password Baru (opsional, min 8 char)</label>
-                  <input name="new_password" type="password" minlength="8" placeholder="Kosongkan jika tidak ganti">
-                  <button class="button sm" type="submit" style="margin-top:.6rem">Simpan Perubahan</button>
-                </form>
-              </details>
-              <form method="post" action="/admin/sso/users/delete" class="inline-form">
-                <input type="hidden" name="csrf" value="{{$.CSRF}}">
-                <input type="hidden" name="app_user_id" value="{{$uid}}">
-                <input type="hidden" name="q" value="{{$.Search}}">
-                <button class="button btn-danger sm" type="submit">Hapus</button>
-              </form>
-              {{end}}
-            </div>
           </td>
           <td>
             {{if not .IsDeleted}}
@@ -842,31 +810,74 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
                 <button class="button secondary sm" type="submit">Cabut</button>
               {{else}}
                 <input type="hidden" name="is_sso_admin" value="true">
-                <button class="button secondary sm" type="submit">Jadikan Admin Pusat</button>
+                <button class="button secondary sm" type="submit">Jadikan Admin</button>
               {{end}}
             </form>
             {{end}}
           </td>
           <td>
             {{if not .IsDeleted}}
-            <div class="inline-form" style="justify-content:space-between;gap:.5rem">
-              <div style="display:flex;flex-wrap:wrap;gap:.3rem;align-items:center">
-                {{$hasAdmin := false}}
-                {{range .Memberships}}{{if eq .Role "admin"}}{{$hasAdmin = true}}<span class="pill admin">{{.ApplicationName}}</span>{{end}}{{end}}
-                {{if not $hasAdmin}}<span class="muted" style="font-size:.8rem">Semua User</span>{{end}}
-              </div>
-              <button type="button" class="button secondary sm" data-open-modal="modal-role-{{$uid}}">Atur Role</button>
+            <div style="display:flex;flex-wrap:wrap;gap:.3rem;align-items:center">
+              {{$hasAdmin := false}}
+              {{range .Memberships}}{{if eq .Role "admin"}}{{$hasAdmin = true}}<span class="pill admin">{{.ApplicationName}}</span>{{end}}{{end}}
+              {{if not $hasAdmin}}<span class="muted" style="font-size:.8rem">Semua User</span>{{end}}
             </div>
             {{end}}
           </td>
+          <td>
+            <div class="row-actions">
+              {{if .IsDeleted}}
+              <form method="post" action="/admin/sso/users/restore" class="inline-form">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="app_user_id" value="{{$uid}}">
+                <input type="hidden" name="q" value="{{$.Search}}">
+                <button class="button secondary sm" type="submit">Pulihkan</button>
+              </form>
+              {{else}}
+              <button type="button" class="button secondary sm" data-open-modal="modal-role-{{$uid}}">Atur Role</button>
+              <button type="button" class="button secondary sm" data-open-modal="modal-edit-{{$uid}}">Edit</button>
+              <form method="post" action="/admin/sso/users/delete" class="inline-form">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="app_user_id" value="{{$uid}}">
+                <input type="hidden" name="q" value="{{$.Search}}">
+                <button class="button btn-danger sm" type="submit">Hapus</button>
+              </form>
+              {{end}}
+            </div>
+          </td>
         </tr>
         {{end}}
+        <tr id="no-search-results" hidden><td colspan="5" class="muted" style="text-align:center;padding:1.25rem">Tidak ada pengguna yang cocok.</td></tr>
       </tbody>
     </table>
   </div>
   {{range .Users}}
   {{if not .IsDeleted}}
   {{$uid := .ID}}
+  <dialog id="modal-edit-{{$uid}}" class="sso-modal" aria-labelledby="modal-edit-title-{{$uid}}">
+    <div class="modal-head">
+      <div>
+        <h3 id="modal-edit-title-{{$uid}}">Edit Pengguna — {{.FullName}}</h3>
+        <div class="muted" style="font-size:.78rem">{{.Email}}</div>
+      </div>
+      <button type="button" class="modal-close" data-close-modal="modal-edit-{{$uid}}" aria-label="Tutup">&times;</button>
+    </div>
+    <div class="modal-body">
+      <form method="post" action="/admin/sso/users/update" class="form-grid">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <input type="hidden" name="app_user_id" value="{{$uid}}">
+        <input type="hidden" name="q" value="{{$.Search}}">
+        <input type="hidden" name="filter" value="{{$.Filter}}">
+        <div class="full"><label>Nama Lengkap</label><input name="full_name" value="{{.FullName}}" required></div>
+        <div><label>No. HP</label><input name="phone" value="{{.Phone}}"></div>
+        <div><label>Password Baru (opsional, min 8 char)</label><input name="new_password" type="password" minlength="8" placeholder="Kosongkan jika tidak ganti"></div>
+        <div class="full" style="display:flex;gap:.5rem;justify-content:flex-end">
+          <button type="button" class="button secondary sm" data-close-modal="modal-edit-{{$uid}}">Batal</button>
+          <button class="button sm" type="submit">Simpan Perubahan</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
   <dialog id="modal-role-{{$uid}}" class="sso-modal" aria-labelledby="modal-role-title-{{$uid}}">
     <div class="modal-head">
       <div>
@@ -957,6 +968,33 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
     actionSel.addEventListener('change', function(){
       memFields.hidden = actionSel.value === 'delete';
     });
+  }
+
+  var searchInput = document.getElementById('live-search-input');
+  var filterSelect = document.getElementById('user-filter-select');
+  var filterForm = document.getElementById('user-filter-form');
+  var visibleCountEl = document.getElementById('visible-user-count');
+  var noResultsRow = document.getElementById('no-search-results');
+  function applyLiveSearch(){
+    if(!searchInput) return;
+    var q = searchInput.value.trim().toLowerCase();
+    var rows = Array.prototype.slice.call(sec.querySelectorAll('tr.user-row'));
+    var shown = 0;
+    rows.forEach(function(row){
+      var hay = (row.getAttribute('data-search') || '').toLowerCase();
+      var match = !q || hay.indexOf(q) !== -1;
+      row.hidden = !match;
+      if(match) shown++;
+    });
+    if(visibleCountEl) visibleCountEl.textContent = String(shown);
+    if(noResultsRow) noResultsRow.hidden = shown > 0 || rows.length === 0;
+  }
+  if(searchInput){
+    searchInput.addEventListener('input', applyLiveSearch);
+    if(searchInput.value.trim()) applyLiveSearch();
+  }
+  if(filterSelect && filterForm){
+    filterSelect.addEventListener('change', function(){ filterForm.submit(); });
   }
 })();
 </script>
