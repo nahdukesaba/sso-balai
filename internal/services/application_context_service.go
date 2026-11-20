@@ -70,7 +70,14 @@ func (s *ApplicationContextService) GetByAppUserID(
 	}
 
 	if membership == nil {
-		return nil, ErrApplicationMembershipUnavailable
+		return &models.ApplicationContext{
+			UserID:          appUserID,
+			ApplicationID:   application.ID,
+			Application:     application.Code,
+			ApplicationName: application.Name,
+			Role:            models.MembershipRoleUser,
+			Status:          models.MembershipStatusApproved,
+		}, nil
 	}
 
 	return &models.ApplicationContext{

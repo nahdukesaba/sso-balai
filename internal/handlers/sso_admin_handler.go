@@ -145,6 +145,9 @@ func (h *BrowserSSOHandler) AdminSSOSaveApp(c *fiber.Ctx) error {
 	name := strings.TrimSpace(c.FormValue("name"))
 	clientID := strings.TrimSpace(c.FormValue("client_id"))
 	policy := strings.ToUpper(strings.TrimSpace(c.FormValue("access_policy")))
+	if policy == "" {
+		policy = services.ApplicationAccessAutoUser
+	}
 	launchURL := strings.TrimSpace(c.FormValue("launch_url"))
 	description := strings.TrimSpace(c.FormValue("description"))
 	isActive := c.FormValue("is_active") == "on" || c.FormValue("is_active") == "true"
@@ -622,7 +625,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
 <div class="tabs-row">
   <nav class="tabs" aria-label="Menu Admin SSO">
     <a class="tab {{if eq .Tab "apps"}}active{{end}}" href="/admin/sso?tab=apps">Aplikasi &amp; Client SSO</a>
-    <a class="tab {{if eq .Tab "users"}}active{{end}}" href="/admin/sso?tab=users">Pengguna, Role &amp; Approval</a>
+    <a class="tab {{if eq .Tab "users"}}active{{end}}" href="/admin/sso?tab=users">Pengguna &amp; Role Admin</a>
   </nav>
   {{if eq .Tab "apps"}}
   <div class="tab-actions">
@@ -652,7 +655,6 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
         <div><label for="app-code">Code (unik, huruf kecil)</label><input id="app-code" name="code" placeholder="mis. arsip" required></div>
         <div><label for="app-name">Nama Aplikasi</label><input id="app-name" name="name" placeholder="mis. Arsip Digital" required></div>
         <div><label for="app-client-id">Client ID</label><input id="app-client-id" name="client_id" placeholder="mis. arsip-web" required></div>
-        <div><label for="app-policy">Kebijakan Akses</label><select id="app-policy" name="access_policy"><option value="AUTO_USER">AUTO_USER (otomatis/approval)</option><option value="RESTRICTED">RESTRICTED (khusus yang disetujui)</option></select></div>
         <div class="full"><label for="app-launch">Launch URL (URL utama web)</label><input id="app-launch" name="launch_url" type="url" placeholder="https://arsip.bp3kpsumatera2.com/" required></div>
         <div class="full"><label for="app-redirects">Redirect URIs (pisahkan dengan koma)</label><input id="app-redirects" name="redirect_uris" placeholder="https://arsip.bp3kpsumatera2.com/auth/sso/callback, http://localhost:8080/auth/sso/callback" required></div>
         <div class="full"><label for="app-logout">Post-Logout Redirect URIs (opsional, pisahkan koma)</label><input id="app-logout" name="post_logout_redirect_uris" placeholder="https://arsip.bp3kpsumatera2.com/"></div>
@@ -671,7 +673,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
   <h2 style="margin-bottom:1rem">Daftar Aplikasi Terdaftar ({{len .Apps}})</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Aplikasi</th><th>Port (FE/BE)</th><th>Client ID</th><th>Kebijakan</th><th>Redirect URIs</th><th>Status</th></tr></thead>
+      <thead><tr><th>Aplikasi</th><th>Port (FE/BE)</th><th>Client ID</th><th>Redirect URIs</th><th>Status</th></tr></thead>
       <tbody>
         {{range .Apps}}
         <tr>
@@ -684,7 +686,6 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
             </div>
           </td>
           <td><code>{{.ClientID}}</code></td>
-          <td><span class="pill admin">{{.AccessPolicy}}</span></td>
           <td style="max-width:22rem;word-break:break-all;font-size:.78rem">{{.RedirectURIsCSV}}</td>
           <td>{{if .IsActive}}<span class="pill approved">Aktif</span>{{else}}<span class="pill disabled">Nonaktif</span>{{end}}</td>
         </tr>
@@ -700,20 +701,14 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
     <button type="button" class="modal-close" data-close-modal="modal-create-user" aria-label="Tutup">&times;</button>
   </div>
   <div class="modal-body">
+    <p class="muted" style="margin-bottom:.85rem">User baru otomatis bisa login ke semua aplikasi sebagai <strong>user</strong>. Untuk menjadikan user sebagai admin di web tertentu, atur role-nya setelah dibuat.</p>
     <form method="post" action="/admin/sso/users/create" class="form-grid">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <div><label for="cu-email">Email Pegawai</label><input id="cu-email" name="email" type="email" placeholder="nama@bp3kpsumatera2.com" required></div>
       <div><label for="cu-name">Nama Lengkap</label><input id="cu-name" name="full_name" placeholder="Nama lengkap pegawai" required></div>
       <div><label for="cu-phone">No. HP (opsional)</label><input id="cu-phone" name="phone" placeholder="0812..."></div>
       <div><label for="cu-pass">Password (min 8 karakter, kosong = kirim invite)</label><input id="cu-pass" name="password" type="password" minlength="8" placeholder="Kosongkan untuk kirim email undangan"></div>
-      <div><label for="cu-role">Role Awal</label><select id="cu-role" name="initial_role"><option value="user">Pengguna (user)</option><option value="admin">Admin (admin)</option></select></div>
-      <div style="display:flex;align-items:flex-end"><label class="check-row"><input type="checkbox" name="is_sso_admin"> Jadikan Admin Pusat SSO</label></div>
-      <div class="full">
-        <label>Beri Akses Awal ke Aplikasi</label>
-        <div class="app-checks">
-          {{range .Apps}}<label class="check-row"><input type="checkbox" name="app_ids" value="{{.ID}}"> {{.Name}}</label>{{end}}
-        </div>
-      </div>
+      <div class="full"><label class="check-row"><input type="checkbox" name="is_sso_admin"> Jadikan Admin Pusat SSO</label></div>
       <div class="full" style="display:flex;gap:.5rem;justify-content:flex-end">
         <button type="button" class="button secondary sm" data-close-modal="modal-create-user">Batal</button>
         <button class="button sm" type="submit">Simpan User Baru</button>
@@ -728,17 +723,17 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
     <button type="button" class="modal-close" data-close-modal="modal-bulk-import" aria-label="Tutup">&times;</button>
   </div>
   <div class="modal-body">
-    <p class="muted" style="margin-bottom:.85rem">Format per baris: <code>email,nama_lengkap,no_hp,password</code> (kolom <code>no_hp</code> dan <code>password</code> opsional; jika password kosong maka otomatis kirim undangan email).</p>
+    <p class="muted" style="margin-bottom:.85rem">Format per baris: <code>email,nama_lengkap,no_hp,password</code> (kolom <code>no_hp</code> dan <code>password</code> opsional; jika password kosong maka otomatis kirim undangan email). Semua user otomatis mendapat akses <strong>user</strong> ke semua aplikasi.</p>
     <form method="post" action="/admin/sso/users/bulk-import" enctype="multipart/form-data" class="form-grid">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="status" value="approved">
       <div class="full"><label for="bi-file">Upload File .csv (opsional)</label><input id="bi-file" name="csv_file" type="file" accept=".csv,text/csv"></div>
       <div class="full"><label for="bi-text">Atau Paste Data CSV di Sini</label><textarea id="bi-text" name="csv_text" rows="4" placeholder="budi@bp3kpsumatera2.com,Budi Santoso,08123456789,Password123!&#10;sari@bp3kpsumatera2.com,Sari Dewi,08129876543,"></textarea></div>
       <div>
-        <label for="bi-app">Otomatis Beri Akses Aplikasi (opsional)</label>
-        <select id="bi-app" name="application_id"><option value="">-- Tidak assign aplikasi --</option>{{range .Apps}}<option value="{{.ID}}">{{.Name}} ({{.Code}})</option>{{end}}</select>
+        <label for="bi-app">Assign Role Khusus di Aplikasi (opsional)</label>
+        <select id="bi-app" name="application_id"><option value="">-- Tidak perlu (semua default user) --</option>{{range .Apps}}<option value="{{.ID}}">{{.Name}} ({{.Code}})</option>{{end}}</select>
       </div>
       <div><label for="bi-role">Role</label><select id="bi-role" name="role"><option value="user">user</option><option value="admin">admin</option></select></div>
-      <div><label for="bi-status">Status Approval</label><select id="bi-status" name="status"><option value="approved">approved</option><option value="pending">pending</option></select></div>
       <div class="full" style="display:flex;gap:.5rem;justify-content:flex-end">
         <button type="button" class="button secondary sm" data-close-modal="modal-bulk-import">Batal</button>
         <button class="button sm" type="submit">Jalankan Bulk Import</button>
@@ -746,36 +741,6 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
     </form>
   </div>
 </dialog>
-
-<section class="panel-box">
-  <h2>Atur Akses Pengguna ke Aplikasi</h2>
-  <p class="muted" style="margin-bottom:1rem">Pilih pengguna dan aplikasi untuk mengatur role (<code>user</code> / <code>admin</code>) dan approval (<code>approved</code> / <code>pending</code> / <code>rejected</code> / <code>disabled</code>).</p>
-  <form method="post" action="/admin/sso/memberships" class="form-grid">
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <input type="hidden" name="q" value="{{.Search}}">
-    <div>
-      <label for="m-user">Pengguna</label>
-      <select id="m-user" name="app_user_id" required>
-        {{range .Users}}{{if not .IsDeleted}}<option value="{{.ID}}">{{.FullName}} ({{.Email}})</option>{{end}}{{end}}
-      </select>
-    </div>
-    <div>
-      <label for="m-app">Aplikasi</label>
-      <select id="m-app" name="application_id" required>
-        {{range .Apps}}<option value="{{.ID}}">{{.Name}} ({{.Code}})</option>{{end}}
-      </select>
-    </div>
-    <div>
-      <label for="m-role">Role</label>
-      <select id="m-role" name="role"><option value="user">Pengguna (user)</option><option value="admin">Admin (admin)</option></select>
-    </div>
-    <div>
-      <label for="m-status">Status Approval</label>
-      <select id="m-status" name="status"><option value="approved">Disetujui (approved)</option><option value="pending">Menunggu (pending)</option><option value="rejected">Ditolak (rejected)</option><option value="disabled">Dinonaktifkan (disabled)</option></select>
-    </div>
-    <div class="full"><button class="button" type="submit">Simpan Akses &amp; Role</button></div>
-  </form>
-</section>
 
 <section id="users-section" class="panel-box">
   <h2 style="margin-bottom:.75rem">Daftar Pengguna, CRUD &amp; Aksi Massal ({{len .Users}})</h2>
@@ -797,10 +762,11 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
     <input type="hidden" name="filter" value="{{.Filter}}">
     <span class="bulk-count"><span id="selected-count">0</span>&nbsp;dipilih</span>
     <select id="bulk-action-select" name="bulk_action" aria-label="Jenis Aksi Massal">
-      <option value="membership">Update Akses Aplikasi</option>
+      <option value="membership">Atur Role Aplikasi</option>
       <option value="delete">Hapus User Terpilih (Soft Delete)</option>
     </select>
     <span id="bulk-membership-fields" class="bulk-fields">
+      <input type="hidden" name="status" value="approved">
       <select name="application_id" aria-label="Aplikasi Target">
         <option value="">-- Pilih Aplikasi --</option>
         {{range .Apps}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
@@ -809,12 +775,6 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
         <option value="user">user</option>
         <option value="admin">admin</option>
       </select>
-      <select name="status" aria-label="Status Target">
-        <option value="approved">approved</option>
-        <option value="pending">pending</option>
-        <option value="rejected">rejected</option>
-        <option value="disabled">disabled</option>
-      </select>
     </span>
     <button class="button sm" type="submit">Terapkan</button>
     <button type="button" id="cancel-select-btn" class="button secondary sm">Batal</button>
@@ -822,7 +782,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
 
   <div class="table-wrap">
     <table>
-      <thead><tr><th class="select-col"><input type="checkbox" id="select-all-cb" title="Pilih Semua" aria-label="Pilih Semua"></th><th>Pegawai &amp; Kelola</th><th>Admin Pusat</th><th>Akses Aplikasi (Role &amp; Approval)</th></tr></thead>
+      <thead><tr><th class="select-col"><input type="checkbox" id="select-all-cb" title="Pilih Semua" aria-label="Pilih Semua"></th><th>Pegawai &amp; Kelola</th><th>Admin Pusat</th><th>Role Aplikasi (Default: User)</th></tr></thead>
       <tbody>
         {{range .Users}}
         {{$uid := .ID}}
@@ -894,20 +854,18 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
                 <input type="hidden" name="csrf" value="{{$.CSRF}}">
                 <input type="hidden" name="app_user_id" value="{{$uid}}">
                 <input type="hidden" name="application_id" value="{{.ApplicationID}}">
+                <input type="hidden" name="status" value="approved">
                 <input type="hidden" name="q" value="{{$.Search}}">
-                <span><strong>{{.ApplicationName}}</strong> <span class="pill {{.Status}}">{{.Status}}</span> <span class="pill admin">{{.Role}}</span></span>
+                <span>
+                  <strong>{{.ApplicationName}}</strong>
+                  {{if eq .Role "admin"}}<span class="pill admin">admin</span>{{else}}<span class="pill">user</span>{{end}}
+                </span>
                 <span class="inline-form">
                   <select name="role" aria-label="Role">
                     <option value="user" {{if eq .Role "user"}}selected{{end}}>user</option>
                     <option value="admin" {{if eq .Role "admin"}}selected{{end}}>admin</option>
                   </select>
-                  <select name="status" aria-label="Status">
-                    <option value="approved" {{if eq .Status "approved"}}selected{{end}}>approved</option>
-                    <option value="pending" {{if eq .Status "pending"}}selected{{end}}>pending</option>
-                    <option value="rejected" {{if eq .Status "rejected"}}selected{{end}}>rejected</option>
-                    <option value="disabled" {{if eq .Status "disabled"}}selected{{end}}>disabled</option>
-                  </select>
-                  <button class="button sm" type="submit">Update</button>
+                  <button class="button sm" type="submit">Simpan</button>
                 </span>
               </form>
               {{else}}

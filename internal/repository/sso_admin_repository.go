@@ -219,14 +219,19 @@ func (r *SSOAdminRepository) ListUsers(ctx context.Context, search string, filte
 	mRows, err := r.pool.Query(
 		ctx,
 		`SELECT
-			m.app_user_id::text,
+			u.id::text,
 			a.id::text,
 			a.code,
 			a.name,
-			m.role,
-			m.status
-		 FROM public.app_memberships m
-		 JOIN public.applications a ON a.id = m.application_id
+			COALESCE(m.role, 'user'),
+			COALESCE(m.status, 'approved')
+		 FROM public.app_users u
+		 CROSS JOIN public.applications a
+		 LEFT JOIN public.app_memberships m
+			ON m.app_user_id = u.id
+			AND m.application_id = a.id
+			AND m.deleted_at IS NULL
+		 WHERE a.is_active = TRUE
 		 ORDER BY a.name ASC`,
 	)
 	if err != nil {

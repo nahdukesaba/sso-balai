@@ -83,9 +83,9 @@ func (r *ApplicationRepository) ListForPortalUser(
 SELECT
     a.code,
     a.name,
-    COALESCE(m.role, ''),
-    COALESCE(m.status, ''),
-    m.id IS NOT NULL
+    COALESCE(m.role, 'user'),
+    COALESCE(m.status, 'approved'),
+    TRUE
 FROM public.applications a
 LEFT JOIN public.app_memberships m
     ON m.application_id = a.id

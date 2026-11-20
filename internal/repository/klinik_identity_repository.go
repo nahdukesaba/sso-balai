@@ -43,16 +43,16 @@ func (r *KlinikIdentityRepository) GetByAppUserID(
 			u.phone,
 			p.nip,
 			a.code,
-			m.role,
-			m.status
+			COALESCE(m.role, 'user'),
+			COALESCE(m.status, 'approved')
 		FROM public.app_users AS u
-		JOIN public.app_memberships AS m
-			ON m.app_user_id = u.id
-			AND m.deleted_at IS NULL
 		JOIN public.applications AS a
-			ON a.id = m.application_id
-			AND a.code = $2
+			ON a.code = $2
 			AND a.is_active = TRUE
+		LEFT JOIN public.app_memberships AS m
+			ON m.app_user_id = u.id
+			AND m.application_id = a.id
+			AND m.deleted_at IS NULL
 		LEFT JOIN public.app_pegawai AS p
 			ON p.app_user_id = u.id
 			AND p.deleted_at IS NULL
