@@ -312,7 +312,7 @@ func Load() (*Config, error) {
 			}
 			bspsClientID := strings.TrimSpace(cfg.SSORealisasiBSPSClientID)
 			if silapetClientID == bspsClientID || klinikClientID == bspsClientID ||
-				(cfg.SSOArsiparisEnabled && strings.TrimSpace(cfg.SSOArsiparisClientID) == bspsClientID) ||
+				strings.TrimSpace(cfg.SSOArsiparisClientID) == bspsClientID ||
 				(cfg.SSOSijabuEnabled && strings.TrimSpace(cfg.SSOSijabuClientID) == bspsClientID) ||
 				(cfg.SSOKompuEnabled && strings.TrimSpace(cfg.SSOKompuClientID) == bspsClientID) {
 				return nil, fmt.Errorf("browser SSO client IDs must be unique")
