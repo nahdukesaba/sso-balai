@@ -2,8 +2,10 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -497,4 +499,43 @@ func (r *SSOAdminRepository) BulkSoftDeleteUsers(
 		strings.TrimSpace(excludeUserID),
 	)
 	return tag.RowsAffected(), nil
+}
+
+func (r *SSOAdminRepository) DeleteApplication(ctx context.Context, code string) (string, error) {
+	cleanCode := strings.ToLower(strings.TrimSpace(code))
+	if cleanCode == "" {
+		return "", nil
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	var appID, clientID string
+	err = tx.QueryRow(
+		ctx,
+		`SELECT id::text, COALESCE(client_id, '')
+		 FROM public.applications
+		 WHERE LOWER(code) = LOWER($1)
+		 LIMIT 1`,
+		cleanCode,
+	).Scan(&appID, &clientID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := tx.Exec(ctx, `DELETE FROM public.app_memberships WHERE application_id = $1`, appID); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM public.applications WHERE id = $1`, appID); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return clientID, nil
 }

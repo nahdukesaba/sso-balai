@@ -35,6 +35,7 @@ func Register(
 		app.Get("/api/v1/auth/sso/session", browserSSOHandler.Session)
 		app.Get("/admin/sso", browserSSOHandler.AdminSSOPage)
 		app.Post("/admin/sso/apps", browserSSOHandler.AdminSSOSaveApp)
+		app.Post("/admin/sso/apps/delete", browserSSOHandler.AdminSSODeleteApp)
 		app.Post("/admin/sso/memberships", browserSSOHandler.AdminSSOSaveMembership)
 		app.Post("/admin/sso/users/superadmin", browserSSOHandler.AdminSSOToggleSuperAdmin)
 		app.Post("/admin/sso/users/create", browserSSOHandler.AdminSSOCreateUser)

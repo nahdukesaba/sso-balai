@@ -10,6 +10,7 @@ import (
 	"html/template"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -161,6 +162,18 @@ func (h *BrowserSSOHandler) AdminSSOSaveApp(c *fiber.Ctx) error {
 		return c.Redirect("/admin/sso?tab=apps&err="+url.QueryEscape("Code, Nama, Client ID, Launch URL, dan Redirect URIs wajib diisi."), fiber.StatusSeeOther)
 	}
 
+	var fePort, bePort *int
+	if raw := strings.TrimSpace(c.FormValue("port")); raw != "" {
+		if p, err := strconv.Atoi(raw); err == nil && p > 0 {
+			fePort = &p
+		}
+	}
+	if raw := strings.TrimSpace(c.FormValue("backend_port")); raw != "" {
+		if p, err := strconv.Atoi(raw); err == nil && p > 0 {
+			bePort = &p
+		}
+	}
+
 	app := repository.SSOAdminApplication{
 		Code:                   code,
 		Name:                   name,
@@ -171,6 +184,8 @@ func (h *BrowserSSOHandler) AdminSSOSaveApp(c *fiber.Ctx) error {
 		PostLogoutRedirectURIs: postLogoutURIs,
 		LaunchURL:              launchURL,
 		Description:            description,
+		Port:                   fePort,
+		BackendPort:            bePort,
 	}
 
 	if err := h.adminRepo.UpsertApplication(c.UserContext(), app); err != nil {
@@ -202,6 +217,31 @@ func (h *BrowserSSOHandler) AdminSSOSaveApp(c *fiber.Ctx) error {
 	}
 
 	return c.Redirect("/admin/sso?tab=apps&msg="+url.QueryEscape("Aplikasi "+name+" berhasil disimpan dan langsung aktif."), fiber.StatusSeeOther)
+}
+
+func (h *BrowserSSOHandler) AdminSSODeleteApp(c *fiber.Ctx) error {
+	_, _, ok := h.requireSSOAdmin(c)
+	if !ok {
+		return nil
+	}
+	if !verifyAdminCSRF(c) {
+		return c.Redirect("/admin/sso?tab=apps&err="+url.QueryEscape("Sesi form kedaluwarsa, silakan coba lagi."), fiber.StatusSeeOther)
+	}
+	code := strings.ToLower(strings.TrimSpace(c.FormValue("code")))
+	if code == "" {
+		return c.Redirect("/admin/sso?tab=apps&err="+url.QueryEscape("Kode aplikasi tidak valid."), fiber.StatusSeeOther)
+	}
+	clientID, err := h.adminRepo.DeleteApplication(c.UserContext(), code)
+	if err != nil {
+		return c.Redirect("/admin/sso?tab=apps&err="+url.QueryEscape("Gagal menghapus aplikasi: "+err.Error()), fiber.StatusSeeOther)
+	}
+	if clientID != "" {
+		h.service.RemoveClient(clientID)
+	}
+	if h.portalService != nil {
+		h.portalService.RemoveApplication(code)
+	}
+	return c.Redirect("/admin/sso?tab=apps&msg="+url.QueryEscape("Aplikasi "+code+" berhasil dihapus."), fiber.StatusSeeOther)
 }
 
 func (h *BrowserSSOHandler) AdminSSOSaveMembership(c *fiber.Ctx) error {
@@ -690,11 +730,13 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
         <div><label for="app-code">Code (unik, huruf kecil)</label><input id="app-code" name="code" placeholder="mis. arsip" required></div>
         <div><label for="app-name">Nama Aplikasi</label><input id="app-name" name="name" placeholder="mis. Arsip Digital" required></div>
         <div><label for="app-client-id">Client ID</label><input id="app-client-id" name="client_id" placeholder="mis. arsip-web" required></div>
+        <div><label for="app-port">Port FE (opsional)</label><input id="app-port" name="port" type="number" min="1" max="65535" placeholder="mis. 3004"></div>
+        <div><label for="app-backend-port">Port BE (opsional)</label><input id="app-backend-port" name="backend_port" type="number" min="1" max="65535" placeholder="mis. 8084"></div>
         <div class="full"><label for="app-launch">Launch URL (URL utama web)</label><input id="app-launch" name="launch_url" type="url" placeholder="https://arsip.bp3kpsumatera2.com/" required></div>
         <div class="full"><label for="app-redirects">Redirect URIs (pisahkan dengan koma)</label><input id="app-redirects" name="redirect_uris" placeholder="https://arsip.bp3kpsumatera2.com/auth/sso/callback, http://localhost:8080/auth/sso/callback" required></div>
         <div class="full"><label for="app-logout">Post-Logout Redirect URIs (opsional, pisahkan koma)</label><input id="app-logout" name="post_logout_redirect_uris" placeholder="https://arsip.bp3kpsumatera2.com/"></div>
         <div class="full"><label for="app-desc">Deskripsi Singkat</label><input id="app-desc" name="description" placeholder="Portal pengelolaan arsip resmi BP3KP Sumatera II"></div>
-        <div class="full"><label class="check-row"><input type="checkbox" name="is_active" checked> Aplikasi Aktif di SSO</label></div>
+        <div class="full"><label class="check-row"><input id="app-active" type="checkbox" name="is_active" checked> Aplikasi Aktif di SSO</label></div>
       </div>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.1rem">
         <button type="button" class="button secondary" data-close-modal="modal-app-form">Batal</button>
@@ -707,12 +749,12 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
 <section class="panel-box">
   <h2 style="margin-bottom:1rem">Daftar Aplikasi Terdaftar ({{len .Apps}})</h2>
   <div class="table-wrap">
-    <table>
-      <thead><tr><th>Aplikasi</th><th>Port (FE/BE)</th><th>Client ID</th><th>Redirect URIs</th><th>Status</th></tr></thead>
+    <table class="users-table">
+      <thead><tr><th>Aplikasi</th><th>Port (FE/BE)</th><th>Client ID</th><th>Redirect URIs</th><th>Status</th><th style="text-align:right">Aksi</th></tr></thead>
       <tbody>
         {{range .Apps}}
         <tr>
-          <td><strong>{{.Name}}</strong><div class="muted" style="font-size:.78rem">{{.Code}} · {{.LaunchURL}}</div></td>
+          <td><strong>{{.Name}}</strong><div class="muted" style="font-size:.78rem">{{.Code}}{{if .LaunchURL}} · {{.LaunchURL}}{{end}}</div></td>
           <td>
             <div style="display:flex;gap:.3rem;flex-wrap:wrap">
               {{if .Port}}<span class="pill" style="font-size:.72rem">FE: {{.Port}}</span>{{end}}
@@ -723,6 +765,26 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
           <td><code>{{.ClientID}}</code></td>
           <td style="max-width:22rem;word-break:break-all;font-size:.78rem">{{.RedirectURIsCSV}}</td>
           <td>{{if .IsActive}}<span class="pill approved">Aktif</span>{{else}}<span class="pill disabled">Nonaktif</span>{{end}}</td>
+          <td>
+            <div class="row-actions">
+              <button type="button" class="button secondary sm edit-app-btn"
+                data-code="{{.Code}}"
+                data-name="{{.Name}}"
+                data-client-id="{{.ClientID}}"
+                data-launch-url="{{.LaunchURL}}"
+                data-redirect-uris="{{.RedirectURIsCSV}}"
+                data-logout-uris="{{.PostLogoutRedirectURIsCSV}}"
+                data-description="{{.Description}}"
+                data-port="{{if .Port}}{{.Port}}{{end}}"
+                data-backend-port="{{if .BackendPort}}{{.BackendPort}}{{end}}"
+                data-active="{{.IsActive}}">Edit</button>
+              <form method="post" action="/admin/sso/apps/delete" class="inline-form">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="code" value="{{.Code}}">
+                <button class="button btn-danger sm" type="submit">Hapus</button>
+              </form>
+            </div>
+          </td>
         </tr>
         {{end}}
       </tbody>
@@ -1046,6 +1108,46 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
   bindModal('open-app-modal-btn', 'modal-app-form');
   bindModal('open-create-user-btn', 'modal-create-user');
   bindModal('open-bulk-import-btn', 'modal-bulk-import');
+  var appModal = document.getElementById('modal-app-form');
+  var appTitle = document.getElementById('modal-app-form-title');
+  var openAppBtn = document.getElementById('open-app-modal-btn');
+  function fillAppModal(vals, title){
+    if(!appModal) return;
+    if(appTitle) appTitle.textContent = title;
+    document.getElementById('app-code').value = vals.code || '';
+    document.getElementById('app-name').value = vals.name || '';
+    document.getElementById('app-client-id').value = vals.clientId || '';
+    document.getElementById('app-port').value = vals.port || '';
+    document.getElementById('app-backend-port').value = vals.backendPort || '';
+    document.getElementById('app-launch').value = vals.launchUrl || '';
+    document.getElementById('app-redirects').value = vals.redirectUris || '';
+    document.getElementById('app-logout').value = vals.logoutUris || '';
+    document.getElementById('app-desc').value = vals.description || '';
+    document.getElementById('app-active').checked = vals.active !== false;
+  }
+  if(openAppBtn){
+    openAppBtn.addEventListener('click', function(){
+      fillAppModal({active:true}, 'Tambah / Perbarui Aplikasi SSO');
+    });
+  }
+  Array.prototype.slice.call(document.querySelectorAll('.edit-app-btn')).forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if(!appModal || !appModal.showModal) return;
+      fillAppModal({
+        code: btn.getAttribute('data-code'),
+        name: btn.getAttribute('data-name'),
+        clientId: btn.getAttribute('data-client-id'),
+        port: btn.getAttribute('data-port'),
+        backendPort: btn.getAttribute('data-backend-port'),
+        launchUrl: btn.getAttribute('data-launch-url'),
+        redirectUris: btn.getAttribute('data-redirect-uris'),
+        logoutUris: btn.getAttribute('data-logout-uris'),
+        description: btn.getAttribute('data-description'),
+        active: btn.getAttribute('data-active') === 'true'
+      }, 'Edit Aplikasi SSO — ' + (btn.getAttribute('data-name') || ''));
+      appModal.showModal();
+    });
+  });
   Array.prototype.slice.call(document.querySelectorAll('[data-open-modal]')).forEach(function(btn){
     btn.addEventListener('click', function(){
       var dlg = document.getElementById(btn.getAttribute('data-open-modal'));
