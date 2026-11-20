@@ -28,6 +28,7 @@ type BrowserSSOHandler struct {
 	service        *services.BrowserSSOService
 	portalService  *services.AccountPortalService
 	adminRepo      *repository.SSOAdminRepository
+	adminAuth      *services.SupabaseAdminService
 	cookieSecure   bool
 	cookieSameSite string
 	sessionTTL     time.Duration

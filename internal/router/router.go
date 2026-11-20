@@ -37,6 +37,12 @@ func Register(
 		app.Post("/admin/sso/apps", browserSSOHandler.AdminSSOSaveApp)
 		app.Post("/admin/sso/memberships", browserSSOHandler.AdminSSOSaveMembership)
 		app.Post("/admin/sso/users/superadmin", browserSSOHandler.AdminSSOToggleSuperAdmin)
+		app.Post("/admin/sso/users/create", browserSSOHandler.AdminSSOCreateUser)
+		app.Post("/admin/sso/users/update", browserSSOHandler.AdminSSOUpdateUser)
+		app.Post("/admin/sso/users/delete", browserSSOHandler.AdminSSODeleteUser)
+		app.Post("/admin/sso/users/restore", browserSSOHandler.AdminSSORestoreUser)
+		app.Post("/admin/sso/users/bulk-import", browserSSOHandler.AdminSSOBulkImportUsers)
+		app.Post("/admin/sso/users/bulk-action", browserSSOHandler.AdminSSOBulkAction)
 	}
 
 	api := app.Group("/api/v1")

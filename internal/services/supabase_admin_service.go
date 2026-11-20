@@ -258,6 +258,53 @@ func (s *SupabaseAdminService) InviteUser(
 	return &models.SupabaseAuthUser{ID: authUser.ID, Email: authUser.Email}, nil
 }
 
+func (s *SupabaseAdminService) UpdateUser(
+	ctx context.Context,
+	userID string,
+	fullName string,
+	password string,
+) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return errors.New("user ID is required")
+	}
+
+	payload := map[string]interface{}{}
+	if trimmedName := strings.TrimSpace(fullName); trimmedName != "" {
+		payload["user_metadata"] = map[string]interface{}{"full_name": trimmedName}
+	}
+	if password != "" {
+		payload["password"] = password
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal admin update user request: %w", err)
+	}
+
+	endpoint := s.baseURL + "/auth/v1/admin/users/" + url.PathEscape(userID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create admin update user request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	s.setAdminHeaders(req)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrAdminUnavailable, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("%w: update user returned status %d", ErrAdminUnavailable, resp.StatusCode)
+	}
+	return nil
+}
+
 func (s *SupabaseAdminService) DeleteUser(
 	ctx context.Context,
 	userID string,

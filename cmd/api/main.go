@@ -349,6 +349,7 @@ func main() {
 	)
 	browserSSOHandler.SetAccountPortalService(accountPortalService)
 	browserSSOHandler.SetAdminRepository(ssoAdminRepository)
+	browserSSOHandler.SetAdminAuthService(supabaseAdminService)
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 	app := fiber.New()
 
