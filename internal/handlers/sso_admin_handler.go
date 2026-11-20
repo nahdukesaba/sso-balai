@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/csv"
 	"encoding/hex"
 	"fmt"
 	"html/template"
 	"io"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -174,6 +176,27 @@ func (h *BrowserSSOHandler) AdminSSOSaveApp(c *fiber.Ctx) error {
 		}
 	}
 
+	logoURL := strings.TrimSpace(c.FormValue("logo_url"))
+	if fh, err := c.FormFile("logo_file"); err == nil && fh != nil && fh.Size > 0 {
+		if fh.Size > 256*1024 {
+			return c.Redirect("/admin/sso?tab=apps&err="+url.QueryEscape("Ukuran file logo maksimal 256 KB."), fiber.StatusSeeOther)
+		}
+		if f, err := fh.Open(); err == nil {
+			rawBytes, readErr := io.ReadAll(io.LimitReader(f, 256*1024+1))
+			_ = f.Close()
+			if readErr == nil && len(rawBytes) > 0 && len(rawBytes) <= 256*1024 {
+				mimeType := http.DetectContentType(rawBytes)
+				lowerName := strings.ToLower(fh.Filename)
+				if strings.HasSuffix(lowerName, ".svg") && (strings.Contains(mimeType, "text/plain") || strings.Contains(mimeType, "text/xml")) {
+					mimeType = "image/svg+xml"
+				}
+				if strings.HasPrefix(mimeType, "image/") {
+					logoURL = "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(rawBytes)
+				}
+			}
+		}
+	}
+
 	app := repository.SSOAdminApplication{
 		Code:                   code,
 		Name:                   name,
@@ -184,6 +207,7 @@ func (h *BrowserSSOHandler) AdminSSOSaveApp(c *fiber.Ctx) error {
 		PostLogoutRedirectURIs: postLogoutURIs,
 		LaunchURL:              launchURL,
 		Description:            description,
+		LogoURL:                logoURL,
 		Port:                   fePort,
 		BackendPort:            bePort,
 	}
@@ -724,7 +748,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
   </div>
   <div class="modal-body">
     <p class="muted" style="margin-bottom:1rem">Isi <strong>Code</strong> yang sama jika ingin memperbarui aplikasi yang sudah ada. Perubahan langsung aktif tanpa restart.</p>
-    <form method="post" action="/admin/sso/apps">
+    <form method="post" action="/admin/sso/apps" enctype="multipart/form-data">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <div class="form-grid">
         <div><label for="app-code">Code (unik, huruf kecil)</label><input id="app-code" name="code" placeholder="mis. arsip" required></div>
@@ -736,6 +760,8 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
         <div class="full"><label for="app-redirects">Redirect URIs (pisahkan dengan koma)</label><input id="app-redirects" name="redirect_uris" placeholder="https://arsip.bp3kpsumatera2.com/auth/sso/callback, http://localhost:8080/auth/sso/callback" required></div>
         <div class="full"><label for="app-logout">Post-Logout Redirect URIs (opsional, pisahkan koma)</label><input id="app-logout" name="post_logout_redirect_uris" placeholder="https://arsip.bp3kpsumatera2.com/"></div>
         <div class="full"><label for="app-desc">Deskripsi Singkat</label><input id="app-desc" name="description" placeholder="Portal pengelolaan arsip resmi BP3KP Sumatera II"></div>
+        <div><label for="app-logo-url">URL Logo (opsional, kosong = Logo BP3KP)</label><input id="app-logo-url" name="logo_url" placeholder="https://.../logo.png"></div>
+        <div><label for="app-logo-file">Atau Upload Logo (maks 256 KB)</label><input id="app-logo-file" name="logo_file" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"></div>
         <div class="full"><label class="check-row"><input id="app-active" type="checkbox" name="is_active" checked> Aplikasi Aktif di SSO</label></div>
       </div>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.1rem">
@@ -754,7 +780,12 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
       <tbody>
         {{range .Apps}}
         <tr>
-          <td><strong>{{.Name}}</strong><div class="muted" style="font-size:.78rem">{{.Code}}{{if .LaunchURL}} · {{.LaunchURL}}{{end}}</div></td>
+          <td>
+            <div style="display:flex;align-items:center;gap:.65rem">
+              <img src="{{if .LogoURL}}{{.LogoURL}}{{else}}/widget/default-logo.png{{end}}" alt="" style="width:2.1rem;height:2.1rem;border-radius:.5rem;object-fit:contain;background:#f8fafc;border:1px solid var(--line);padding:.2rem;flex-shrink:0">
+              <div><strong>{{.Name}}</strong><div class="muted" style="font-size:.78rem">{{.Code}}{{if .LaunchURL}} · {{.LaunchURL}}{{end}}</div></div>
+            </div>
+          </td>
           <td>
             <div style="display:flex;gap:.3rem;flex-wrap:wrap">
               {{if .Port}}<span class="pill" style="font-size:.72rem">FE: {{.Port}}</span>{{end}}
@@ -775,6 +806,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
                 data-redirect-uris="{{.RedirectURIsCSV}}"
                 data-logout-uris="{{.PostLogoutRedirectURIsCSV}}"
                 data-description="{{.Description}}"
+                data-logo-url="{{.LogoURL}}"
                 data-port="{{if .Port}}{{.Port}}{{end}}"
                 data-backend-port="{{if .BackendPort}}{{.BackendPort}}{{end}}"
                 data-active="{{.IsActive}}">Edit</button>
@@ -1123,6 +1155,9 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
     document.getElementById('app-redirects').value = vals.redirectUris || '';
     document.getElementById('app-logout').value = vals.logoutUris || '';
     document.getElementById('app-desc').value = vals.description || '';
+    document.getElementById('app-logo-url').value = vals.logoUrl || '';
+    var lf = document.getElementById('app-logo-file');
+    if(lf) lf.value = '';
     document.getElementById('app-active').checked = vals.active !== false;
   }
   if(openAppBtn){
@@ -1143,6 +1178,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
         redirectUris: btn.getAttribute('data-redirect-uris'),
         logoutUris: btn.getAttribute('data-logout-uris'),
         description: btn.getAttribute('data-description'),
+        logoUrl: btn.getAttribute('data-logo-url'),
         active: btn.getAttribute('data-active') === 'true'
       }, 'Edit Aplikasi SSO — ' + (btn.getAttribute('data-name') || ''));
       appModal.showModal();

@@ -11,9 +11,26 @@ type publicAppItem struct {
 	Code      string `json:"code"`
 	Name      string `json:"name"`
 	LaunchURL string `json:"launchUrl"`
+	LogoURL   string `json:"logoUrl"`
 }
 
-// PublicApps returns active applications with launch URLs for the universal app-switcher widget.
+func requestOrigin(c *fiber.Ctx) string {
+	scheme := c.Protocol()
+	if xfProto := strings.TrimSpace(c.Get("X-Forwarded-Proto")); xfProto != "" {
+		scheme = strings.Split(xfProto, ",")[0]
+	}
+	return fmt.Sprintf("%s://%s", scheme, c.Hostname())
+}
+
+// DefaultLogoPNG serves the default BP3KP logo for applications without a custom logo.
+func (h *BrowserSSOHandler) DefaultLogoPNG(c *fiber.Ctx) error {
+	c.Set("Access-Control-Allow-Origin", "*")
+	c.Set(fiber.HeaderCacheControl, "public, max-age=86400")
+	c.Set(fiber.HeaderContentType, "image/png")
+	return c.Send(accountPortalLogoPNG)
+}
+
+// PublicApps returns active applications with launch URLs and logos for the universal app-switcher widget.
 func (h *BrowserSSOHandler) PublicApps(c *fiber.Ctx) error {
 	c.Set("Access-Control-Allow-Origin", "*")
 	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
@@ -22,6 +39,7 @@ func (h *BrowserSSOHandler) PublicApps(c *fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusNoContent)
 	}
 
+	defaultLogo := requestOrigin(c) + "/widget/default-logo.png"
 	var items []publicAppItem
 	if h != nil && h.adminRepo != nil {
 		apps, err := h.adminRepo.ListApplications(c.UserContext())
@@ -30,10 +48,15 @@ func (h *BrowserSSOHandler) PublicApps(c *fiber.Ctx) error {
 				if !a.IsActive || strings.TrimSpace(a.LaunchURL) == "" {
 					continue
 				}
+				logo := strings.TrimSpace(a.LogoURL)
+				if logo == "" {
+					logo = defaultLogo
+				}
 				items = append(items, publicAppItem{
 					Code:      a.Code,
 					Name:      a.Name,
 					LaunchURL: a.LaunchURL,
+					LogoURL:   logo,
 				})
 			}
 		}
@@ -42,7 +65,8 @@ func (h *BrowserSSOHandler) PublicApps(c *fiber.Ctx) error {
 		items = []publicAppItem{}
 	}
 	return c.JSON(fiber.Map{
-		"apps": items,
+		"defaultLogoUrl": defaultLogo,
+		"apps":           items,
 	})
 }
 
@@ -51,13 +75,7 @@ func (h *BrowserSSOHandler) AppSwitcherWidgetJS(c *fiber.Ctx) error {
 	c.Set("Access-Control-Allow-Origin", "*")
 	c.Set(fiber.HeaderCacheControl, "public, max-age=300")
 	c.Set(fiber.HeaderContentType, "application/javascript; charset=utf-8")
-
-	scheme := c.Protocol()
-	if xfProto := strings.TrimSpace(c.Get("X-Forwarded-Proto")); xfProto != "" {
-		scheme = strings.Split(xfProto, ",")[0]
-	}
-	defaultOrigin := fmt.Sprintf("%s://%s", scheme, c.Hostname())
-	return c.SendString(strings.ReplaceAll(appSwitcherWidgetScript, "__DEFAULT_SSO_ORIGIN__", defaultOrigin))
+	return c.SendString(strings.ReplaceAll(appSwitcherWidgetScript, "__DEFAULT_SSO_ORIGIN__", requestOrigin(c)))
 }
 
 const appSwitcherWidgetScript = `(function(){
@@ -67,44 +85,6 @@ const appSwitcherWidgetScript = `(function(){
   var detectedOrigin = '__DEFAULT_SSO_ORIGIN__';
   if (scriptEl && scriptEl.src) {
     try { detectedOrigin = new URL(scriptEl.src).origin; } catch (_) {}
-  }
-
-  var ICONS = {
-    silapet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>',
-    klinik_pkp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3"/><path d="M8 15v1a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6v-4"/><circle cx="20" cy="10" r="2"/></svg>',
-    arsiparis: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/></svg>',
-    kompu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>',
-    sijabu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
-    'realisasi-bsps': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>',
-    account: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>'
-  };
-
-  var PALETTE = {
-    silapet: { bg: '#CBE5F3', fg: '#0284C7' },
-    klinik_pkp: { bg: '#C6EBDD', fg: '#0F766E' },
-    arsiparis: { bg: '#F7DFC2', fg: '#D97706' },
-    kompu: { bg: '#E5DAF7', fg: '#7C3AED' },
-    sijabu: { bg: '#CCEAE6', fg: '#0B5D78' },
-    'realisasi-bsps': { bg: '#F8D7DA', fg: '#E11D48' },
-    account: { bg: '#EFE8D2', fg: '#0B5D78' }
-  };
-
-  var FALLBACK = [
-    { bg: '#CBE5F3', fg: '#0284C7' },
-    { bg: '#C6EBDD', fg: '#0F766E' },
-    { bg: '#F7DFC2', fg: '#D97706' },
-    { bg: '#E5DAF7', fg: '#7C3AED' },
-    { bg: '#F8D7DA', fg: '#E11D48' }
-  ];
-
-  function colorFor(code, idx) {
-    var key = (code || '').toLowerCase();
-    return PALETTE[key] || FALLBACK[idx % FALLBACK.length];
-  }
-
-  function iconFor(code) {
-    var key = (code || '').toLowerCase();
-    return ICONS[key] || ICONS.silapet;
   }
 
   function esc(s) {
@@ -117,6 +97,7 @@ const appSwitcherWidgetScript = `(function(){
       this.attachShadow({ mode: 'open' });
       this._open = false;
       this._apps = null;
+      this._defaultLogo = null;
       this._onDocClick = this._handleDocClick.bind(this);
       this._onKeyDown = this._handleKeyDown.bind(this);
     }
@@ -171,6 +152,7 @@ const appSwitcherWidgetScript = `(function(){
         .then(function(r){ return r.json(); })
         .then(function(data){
           self._apps = Array.isArray(data.apps) ? data.apps : [];
+          self._defaultLogo = data.defaultLogoUrl || (self._ssoBase() + '/widget/default-logo.png');
           self._renderGrid();
         })
         .catch(function(){
@@ -183,23 +165,29 @@ const appSwitcherWidgetScript = `(function(){
       if (!grid) return;
       var current = (this.getAttribute('current-app') || '').toLowerCase();
       var base = this._ssoBase();
+      var fallbackLogo = this._defaultLogo || (base + '/widget/default-logo.png');
       var html = '';
       var apps = this._apps || [];
       for (var i = 0; i < apps.length; i++) {
         var a = apps[i];
-        var c = colorFor(a.code, i);
+        var logo = a.logoUrl || fallbackLogo;
         var isCurrent = current && String(a.code || '').toLowerCase() === current;
         html += '<a class="tile' + (isCurrent ? ' current' : '') + '" href="' + esc(a.launchUrl) + '" target="_blank" rel="noopener">'
-          + '<span class="icon-box" style="background:' + c.bg + ';color:' + c.fg + '">' + iconFor(a.code) + '</span>'
+          + '<span class="logo-box"><img src="' + esc(logo) + '" alt="' + esc(a.name) + '" loading="lazy"></span>'
           + '<span class="tile-label">' + esc(a.name) + '</span>'
           + '</a>';
       }
-      var acc = PALETTE.account;
       html += '<a class="tile" href="' + esc(base + '/') + '" target="_blank" rel="noopener">'
-        + '<span class="icon-box" style="background:' + acc.bg + ';color:' + acc.fg + '">' + ICONS.account + '</span>'
+        + '<span class="logo-box"><img src="' + esc(fallbackLogo) + '" alt="Akun SSO" loading="lazy"></span>'
         + '<span class="tile-label">Akun SSO</span>'
         + '</a>';
       grid.innerHTML = html;
+      var imgs = grid.querySelectorAll('img');
+      for (var j = 0; j < imgs.length; j++) {
+        imgs[j].addEventListener('error', function(){
+          if (this.src !== fallbackLogo) this.src = fallbackLogo;
+        });
+      }
     }
 
     _render() {
@@ -208,24 +196,23 @@ const appSwitcherWidgetScript = `(function(){
       var base = this._ssoBase();
       this.shadowRoot.innerHTML = '<style>'
         + ':host{position:relative;display:inline-block;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,sans-serif}'
-        + '.trigger{display:inline-flex;align-items:center;gap:.45rem;padding:.45rem .75rem;border-radius:.75rem;border:1px solid rgba(15,23,42,.14);background:#FDFBF4;color:#0B333D;font:inherit;font-size:.85rem;font-weight:600;cursor:pointer;box-shadow:0 1px 2px rgba(15,23,42,.06);transition:background .15s,transform .1s}'
-        + '.trigger:hover{background:#F5EEDC}'
-        + '.trigger svg{width:1.1rem;height:1.1rem;flex-shrink:0}'
-        + '.panel{position:absolute;top:calc(100% + .55rem);' + align + ';width:min(22rem,calc(100vw - 1.5rem));background:#FDFBF4;border:1px solid #E5DEC9;border-radius:1.25rem;padding:1rem;box-shadow:0 20px 45px rgba(15,23,42,.18);z-index:9999;color:#0B333D}'
+        + '.trigger{display:inline-flex;align-items:center;gap:.45rem;padding:.45rem .65rem;border-radius:.65rem;border:1px solid #cbd5e1;background:#ffffff;color:#0f172a;font:inherit;font-size:.84rem;font-weight:600;cursor:pointer;box-shadow:0 1px 2px rgba(15,23,42,.06);transition:background .15s,border-color .15s}'
+        + '.trigger:hover{background:#f1f5f9;border-color:#94a3b8}'
+        + '.trigger svg{width:1.1rem;height:1.1rem;flex-shrink:0;color:#0b5d78}'
+        + '.panel{position:absolute;top:calc(100% + .55rem);' + align + ';width:min(22.5rem,calc(100vw - 1.5rem));background:#ffffff;border:1px solid #e2e8f0;border-radius:1rem;padding:1rem;box-shadow:0 20px 45px rgba(15,23,42,.15);z-index:9999;color:#0f172a}'
         + '.panel[hidden]{display:none}'
-        + '.head{display:flex;align-items:center;justify-content:space-between;padding:0 .25rem .75rem}'
-        + '.title{font-size:.75rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#64748B}'
-        + '.portal-link{font-size:.82rem;font-weight:600;color:#0B5D78;text-decoration:none}'
+        + '.head{display:flex;align-items:center;justify-content:space-between;padding:0 .15rem .75rem;border-bottom:1px solid #f1f5f9;margin-bottom:.75rem}'
+        + '.title{font-size:.74rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#64748b}'
+        + '.portal-link{font-size:.8rem;font-weight:600;color:#0b5d78;text-decoration:none}'
         + '.portal-link:hover{text-decoration:underline}'
-        + '.tray{background:#F5EEDC;border-radius:1rem;padding:1rem .75rem}'
-        + '.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.85rem .5rem}'
-        + '.tile{display:flex;flex-direction:column;align-items:center;gap:.42rem;text-decoration:none;color:#0B333D;padding:.35rem .25rem;border-radius:.75rem;transition:background .15s,transform .12s}'
-        + '.tile:hover{background:rgba(255,255,255,.6);transform:translateY(-1px)}'
-        + '.tile.current{background:rgba(11,93,120,.1)}'
-        + '.icon-box{width:3rem;height:3rem;border-radius:.95rem;display:grid;place-items:center;box-shadow:0 1px 2px rgba(15,23,42,.05)}'
-        + '.icon-box svg{width:1.35rem;height:1.35rem}'
-        + '.tile-label{font-size:.78rem;font-weight:600;line-height:1.2;text-align:center;word-break:break-word}'
-        + '.loading{grid-column:1/-1;text-align:center;font-size:.82rem;color:#64748B;padding:1rem 0}'
+        + '.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.55rem}'
+        + '.tile{display:flex;flex-direction:column;align-items:center;gap:.42rem;text-decoration:none;color:#0f172a;padding:.6rem .35rem;border-radius:.75rem;border:1px solid transparent;transition:background .15s,border-color .15s,transform .12s}'
+        + '.tile:hover{background:#f8fafc;border-color:#e2e8f0;transform:translateY(-1px)}'
+        + '.tile.current{background:#e0f2fe;border-color:#bae6fd}'
+        + '.logo-box{width:2.9rem;height:2.9rem;border-radius:.75rem;background:#f8fafc;border:1px solid #e2e8f0;display:grid;place-items:center;padding:.35rem;overflow:hidden}'
+        + '.logo-box img{width:100%;height:100%;object-fit:contain;display:block}'
+        + '.tile-label{font-size:.77rem;font-weight:600;line-height:1.2;text-align:center;word-break:break-word;color:#1e293b}'
+        + '.loading{grid-column:1/-1;text-align:center;font-size:.82rem;color:#64748b;padding:1.25rem 0}'
         + '</style>'
         + '<button id="trigger" class="trigger" type="button" aria-haspopup="true" aria-expanded="false" title="Aplikasi BP3KP">'
         + '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/><circle cx="19" cy="19" r="2"/></svg>'
@@ -233,7 +220,7 @@ const appSwitcherWidgetScript = `(function(){
         + '</button>'
         + '<div id="panel" class="panel" hidden>'
         + '<div class="head"><span class="title">Aplikasi BP3KP</span><a class="portal-link" href="' + esc(base + '/') + '" target="_blank" rel="noopener">Portal SSO &#8599;</a></div>'
-        + '<div class="tray"><div id="grid" class="grid"></div></div>'
+        + '<div id="grid" class="grid"></div>'
         + '</div>';
       var self = this;
       this.shadowRoot.getElementById('trigger').addEventListener('click', function(e){

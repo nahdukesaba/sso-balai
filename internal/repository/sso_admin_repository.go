@@ -20,6 +20,7 @@ type SSOAdminApplication struct {
 	PostLogoutRedirectURIs []string
 	LaunchURL              string
 	Description            string
+	LogoURL                string
 	Port                   *int
 	BackendPort            *int
 }
@@ -83,6 +84,7 @@ func (r *SSOAdminRepository) ListApplications(ctx context.Context) ([]SSOAdminAp
 			COALESCE(post_logout_redirect_uris, '{}'),
 			COALESCE(launch_url, ''),
 			COALESCE(description, ''),
+			COALESCE(logo_url, ''),
 			port,
 			backend_port
 		 FROM public.applications
@@ -107,6 +109,7 @@ func (r *SSOAdminRepository) ListApplications(ctx context.Context) ([]SSOAdminAp
 			&item.PostLogoutRedirectURIs,
 			&item.LaunchURL,
 			&item.Description,
+			&item.LogoURL,
 			&item.Port,
 			&item.BackendPort,
 		); err != nil {
@@ -131,9 +134,9 @@ func (r *SSOAdminRepository) UpsertApplication(ctx context.Context, app SSOAdmin
 		ctx,
 		`INSERT INTO public.applications (
 			code, name, is_active, client_id, access_policy,
-			redirect_uris, post_logout_redirect_uris, launch_url, description, port, backend_port
+			redirect_uris, post_logout_redirect_uris, launch_url, description, logo_url, port, backend_port
 		)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9, $10, $11)
+		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (code) DO UPDATE SET
 			name = EXCLUDED.name,
 			is_active = EXCLUDED.is_active,
@@ -143,6 +146,7 @@ func (r *SSOAdminRepository) UpsertApplication(ctx context.Context, app SSOAdmin
 			post_logout_redirect_uris = EXCLUDED.post_logout_redirect_uris,
 			launch_url = EXCLUDED.launch_url,
 			description = EXCLUDED.description,
+			logo_url = EXCLUDED.logo_url,
 			port = COALESCE(EXCLUDED.port, public.applications.port),
 			backend_port = COALESCE(EXCLUDED.backend_port, public.applications.backend_port)
 		RETURNING id::text`,
@@ -155,6 +159,7 @@ func (r *SSOAdminRepository) UpsertApplication(ctx context.Context, app SSOAdmin
 		app.PostLogoutRedirectURIs,
 		strings.TrimSpace(app.LaunchURL),
 		strings.TrimSpace(app.Description),
+		strings.TrimSpace(app.LogoURL),
 		app.Port,
 		app.BackendPort,
 	).Scan(&appID)

@@ -35,6 +35,7 @@ func Register(
 		app.Get("/api/v1/auth/sso/session", browserSSOHandler.Session)
 		app.Get("/api/v1/public/apps", browserSSOHandler.PublicApps)
 		app.Options("/api/v1/public/apps", browserSSOHandler.PublicApps)
+		app.Get("/widget/default-logo.png", browserSSOHandler.DefaultLogoPNG)
 		app.Get("/widget/app-switcher.js", browserSSOHandler.AppSwitcherWidgetJS)
 		app.Get("/admin/sso", browserSSOHandler.AdminSSOPage)
 		app.Post("/admin/sso/apps", browserSSOHandler.AdminSSOSaveApp)
