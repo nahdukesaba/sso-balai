@@ -620,8 +620,9 @@ th{font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mu
 .modal-body{padding:1.25rem;overflow-y:auto;max-height:calc(100vh - 7rem)}
 .users-table td{vertical-align:middle}
 .row-actions{display:flex;gap:.35rem;justify-content:flex-end;align-items:center;white-space:nowrap}
-main{max-width:84rem}
-.admin-shell{display:grid;grid-template-columns:15.5rem minmax(0,1fr);gap:1.5rem;align-items:start}
+.header-inner{max-width:none;padding:.85rem 1.75rem}
+main{max-width:none;padding:1.5rem 1.75rem 3rem}
+.admin-shell{display:grid;grid-template-columns:14.5rem minmax(0,1fr);gap:1.5rem;align-items:start}
 .admin-sidebar{position:sticky;top:1.25rem;background:#fff;border:1px solid var(--line);border-radius:1rem;padding:1rem;box-shadow:var(--shadow)}
 .side-title{font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:.2rem .65rem .65rem}
 .side-nav{display:flex;flex-direction:column;gap:.3rem}
