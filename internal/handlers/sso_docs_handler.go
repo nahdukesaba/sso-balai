@@ -207,7 +207,7 @@ const role: "admin" | "user" = isAdmin ? "admin" : "user";
 
 > **Alternatif via Endpoint Terautentikasi:**
 > Dengan `+"`accessToken`"+` dari response exchange, backend/frontend juga bisa memanggil:
-> `+"`GET %s/api/v1/auth/application-context?app={SSO_APP_CODE}`"+` dengan header `+"`Authorization: Bearer <accessToken>`"+` untuk mendapatkan `+"`{ "application": "arsiparis", "role": "admin" | "user", "status": "approved" }`"+`.
+> `+"`GET %s/api/v1/auth/application-context?app={SSO_APP_CODE}`"+` dengan header `+"`Authorization: Bearer <accessToken>`"+` untuk mendapatkan `+"`{ \"application\": \"arsiparis\", \"role\": \"admin\" | \"user\", \"status\": \"approved\" }`"+`.
 
 ---
 
@@ -292,10 +292,10 @@ export function AppLauncher({
 ## 7. Checklist Verifikasi Integrasi (Definition of Done)
 
 Pastikan seluruh poin berikut terpenuhi sebelum menyatakan integrasi selesai:
-- [ ] Aplikasi sudah terdaftar dan berstatus **Aktif** di `%s/admin/sso?tab=apps`.
-- [ ] `Redirect URIs` di Admin Pusat SSO sudah memuat URL callback production dan local development secara presisi.
-- [ ] Klik tombol Login SSO di website target mengarahkan ke `%s/authorize` dengan parameter `code_challenge_method=S256`.
-- [ ] Route callback memvalidasi `state`, memanggil `POST %s/api/v1/auth/sso/exchange`, menyimpan sesi user beserta role (`user` atau `admin`), lalu mengarahkan ke halaman utama/dashboard.
-- [ ] Widget `<bp3kp-app-switcher>` tampil di header/navbar dan menampilkan daftar aplikasi terbaru beserta logonya dari `%s/api/v1/public/apps`.
+- [ ] Aplikasi sudah terdaftar dan berstatus **Aktif** di `+"`%s/admin/sso?tab=apps`"+`.
+- [ ] `+"`Redirect URIs`"+` di Admin Pusat SSO sudah memuat URL callback production dan local development secara presisi.
+- [ ] Klik tombol Login SSO di website target mengarahkan ke `+"`%s/authorize`"+` dengan parameter `+"`code_challenge_method=S256`"+`.
+- [ ] Route callback memvalidasi `+"`state`"+`, memanggil `+"`POST %s/api/v1/auth/sso/exchange`"+`, menyimpan sesi user beserta role (`+"`user`"+` atau `+"`admin`"+`), lalu mengarahkan ke halaman utama/dashboard.
+- [ ] Widget `+"`<bp3kp-app-switcher>`"+` tampil di header/navbar dan menampilkan daftar aplikasi terbaru beserta logonya dari `+"`%s/api/v1/public/apps`"+`.
 `, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin)
 }
