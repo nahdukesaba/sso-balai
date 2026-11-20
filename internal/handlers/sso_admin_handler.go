@@ -848,36 +848,60 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
             {{end}}
           </td>
           <td>
-            <div class="mem-list">
-              {{range .Memberships}}
-              <form method="post" action="/admin/sso/memberships" class="mem-row">
-                <input type="hidden" name="csrf" value="{{$.CSRF}}">
-                <input type="hidden" name="app_user_id" value="{{$uid}}">
-                <input type="hidden" name="application_id" value="{{.ApplicationID}}">
-                <input type="hidden" name="status" value="approved">
-                <input type="hidden" name="q" value="{{$.Search}}">
-                <span>
-                  <strong>{{.ApplicationName}}</strong>
-                  {{if eq .Role "admin"}}<span class="pill admin">admin</span>{{else}}<span class="pill">user</span>{{end}}
-                </span>
-                <span class="inline-form">
-                  <select name="role" aria-label="Role">
-                    <option value="user" {{if eq .Role "user"}}selected{{end}}>user</option>
-                    <option value="admin" {{if eq .Role "admin"}}selected{{end}}>admin</option>
-                  </select>
-                  <button class="button sm" type="submit">Simpan</button>
-                </span>
-              </form>
-              {{else}}
-              <span class="muted" style="font-size:.8rem">Belum ada akses aplikasi.</span>
-              {{end}}
+            {{if not .IsDeleted}}
+            <div class="inline-form" style="justify-content:space-between;gap:.5rem">
+              <div style="display:flex;flex-wrap:wrap;gap:.3rem;align-items:center">
+                {{$hasAdmin := false}}
+                {{range .Memberships}}{{if eq .Role "admin"}}{{$hasAdmin = true}}<span class="pill admin">{{.ApplicationName}}</span>{{end}}{{end}}
+                {{if not $hasAdmin}}<span class="muted" style="font-size:.8rem">Semua User</span>{{end}}
+              </div>
+              <button type="button" class="button secondary sm" data-open-modal="modal-role-{{$uid}}">Atur Role</button>
             </div>
+            {{end}}
           </td>
         </tr>
         {{end}}
       </tbody>
     </table>
   </div>
+  {{range .Users}}
+  {{if not .IsDeleted}}
+  {{$uid := .ID}}
+  <dialog id="modal-role-{{$uid}}" class="sso-modal" aria-labelledby="modal-role-title-{{$uid}}">
+    <div class="modal-head">
+      <div>
+        <h3 id="modal-role-title-{{$uid}}">Role Aplikasi — {{.FullName}}</h3>
+        <div class="muted" style="font-size:.78rem">{{.Email}}</div>
+      </div>
+      <button type="button" class="modal-close" data-close-modal="modal-role-{{$uid}}" aria-label="Tutup">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="mem-list">
+        {{range .Memberships}}
+        <form method="post" action="/admin/sso/memberships" class="mem-row">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="app_user_id" value="{{$uid}}">
+          <input type="hidden" name="application_id" value="{{.ApplicationID}}">
+          <input type="hidden" name="status" value="approved">
+          <input type="hidden" name="q" value="{{$.Search}}">
+          <span>
+            <strong>{{.ApplicationName}}</strong>
+            {{if eq .Role "admin"}}<span class="pill admin">admin</span>{{else}}<span class="pill">user</span>{{end}}
+          </span>
+          <span class="inline-form">
+            <select name="role" aria-label="Role">
+              <option value="user" {{if eq .Role "user"}}selected{{end}}>user</option>
+              <option value="admin" {{if eq .Role "admin"}}selected{{end}}>admin</option>
+            </select>
+            <button class="button sm" type="submit">Simpan</button>
+          </span>
+        </form>
+        {{end}}
+      </div>
+    </div>
+  </dialog>
+  {{end}}
+  {{end}}
 </section>
 <script nonce="{{.Nonce}}">
 (function(){
@@ -951,6 +975,17 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
   bindModal('open-app-modal-btn', 'modal-app-form');
   bindModal('open-create-user-btn', 'modal-create-user');
   bindModal('open-bulk-import-btn', 'modal-bulk-import');
+  Array.prototype.slice.call(document.querySelectorAll('[data-open-modal]')).forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var dlg = document.getElementById(btn.getAttribute('data-open-modal'));
+      if(dlg && dlg.showModal) dlg.showModal();
+    });
+  });
+  Array.prototype.slice.call(document.querySelectorAll('dialog.sso-modal')).forEach(function(dlg){
+    dlg.addEventListener('click', function(e){
+      if(e.target === dlg) dlg.close();
+    });
+  });
   Array.prototype.slice.call(document.querySelectorAll('[data-close-modal]')).forEach(function(btn){
     btn.addEventListener('click', function(){
       var dlg = document.getElementById(btn.getAttribute('data-close-modal'));
