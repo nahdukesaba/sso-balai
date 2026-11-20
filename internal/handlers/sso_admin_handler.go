@@ -96,11 +96,17 @@ func (h *BrowserSSOHandler) AdminSSOPage(c *fiber.Ctx) error {
 		})
 	}
 
+	nonce, err := services.RandomBrowserSSOToken(16)
+	if err != nil {
+		nonce = csrf[:16]
+	}
 	setAccountPortalPageHeaders(c)
+	c.Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'nonce-"+nonce+"'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 	var out strings.Builder
 	err = ssoAdminTemplate.Execute(&out, struct {
 		AdminName string
 		CSRF      string
+		Nonce     string
 		Tab       string
 		Search    string
 		Filter    string
@@ -111,6 +117,7 @@ func (h *BrowserSSOHandler) AdminSSOPage(c *fiber.Ctx) error {
 	}{
 		AdminName: adminName,
 		CSRF:      csrf,
+		Nonce:     nonce,
 		Tab:       normalizeAdminTab(c.Query("tab")),
 		Search:    search,
 		Filter:    filter,
@@ -592,6 +599,12 @@ th{font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mu
 .edit-box{margin-top:.55rem;padding:.65rem;border:1px solid var(--line);border-radius:.6rem;background:#f8fafc}
 .edit-box input{margin-top:.25rem;padding:.45rem .6rem;font-size:.82rem}
 .edit-box label{margin-top:.45rem;font-size:.76rem}
+.select-col{display:none;width:2.5rem;text-align:center}
+#users-section.select-mode .select-col{display:table-cell}
+.bulk-bar[hidden]{display:none}
+.bulk-count{display:inline-flex;align-items:center;padding:.2rem .65rem;border-radius:999px;background:var(--accent);color:#fff;font-size:.76rem;font-weight:700}
+.bulk-fields{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
+.bulk-fields[hidden]{display:none}
 `
 
 var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Pusat SSO - BP3KP Sumatera II</title>` + accountPortalFavicon + `<style>` + ssoAdminStyles + `</style></head><body>` + accountPortalBrandHeader + `<div class="user-nav"><a class="button secondary sm" href="/">Portal Aplikasi</a><span class="user-chip"><span class="avatar" aria-hidden="true">A</span>{{.AdminName}}</span><a class="button secondary sm" href="/logout?portal=1&immediate=1">Keluar</a></div></div></header><main>
@@ -722,7 +735,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
   </form>
 </section>
 
-<section class="panel-box">
+<section id="users-section" class="panel-box">
   <h2 style="margin-bottom:.75rem">Daftar Pengguna, CRUD &amp; Aksi Massal ({{len .Users}})</h2>
   <form method="get" action="/admin/sso" class="search-bar">
     <input type="hidden" name="tab" value="users">
@@ -733,44 +746,48 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
       <option value="all" {{if eq .Filter "all"}}selected{{end}}>Semua User</option>
     </select>
     <button class="button secondary" type="submit">Filter</button>
+    <button type="button" id="toggle-select-btn" class="button secondary">Pilih</button>
   </form>
 
-  <form id="bulk-form" method="post" action="/admin/sso/users/bulk-action" class="bulk-bar">
+  <form id="bulk-form" method="post" action="/admin/sso/users/bulk-action" class="bulk-bar" hidden>
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <input type="hidden" name="q" value="{{.Search}}">
     <input type="hidden" name="filter" value="{{.Filter}}">
-    <strong style="font-size:.82rem">Aksi Massal (centang user di tabel):</strong>
-    <select name="bulk_action" aria-label="Jenis Aksi Massal">
+    <span class="bulk-count"><span id="selected-count">0</span>&nbsp;dipilih</span>
+    <select id="bulk-action-select" name="bulk_action" aria-label="Jenis Aksi Massal">
       <option value="membership">Update Akses Aplikasi</option>
       <option value="delete">Hapus User Terpilih (Soft Delete)</option>
     </select>
-    <select name="application_id" aria-label="Aplikasi Target">
-      <option value="">-- Pilih Aplikasi --</option>
-      {{range .Apps}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
-    </select>
-    <select name="role" aria-label="Role Target">
-      <option value="user">user</option>
-      <option value="admin">admin</option>
-    </select>
-    <select name="status" aria-label="Status Target">
-      <option value="approved">approved</option>
-      <option value="pending">pending</option>
-      <option value="rejected">rejected</option>
-      <option value="disabled">disabled</option>
-    </select>
-    <button class="button sm" type="submit">Terapkan ke Terpilih</button>
+    <span id="bulk-membership-fields" class="bulk-fields">
+      <select name="application_id" aria-label="Aplikasi Target">
+        <option value="">-- Pilih Aplikasi --</option>
+        {{range .Apps}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+      <select name="role" aria-label="Role Target">
+        <option value="user">user</option>
+        <option value="admin">admin</option>
+      </select>
+      <select name="status" aria-label="Status Target">
+        <option value="approved">approved</option>
+        <option value="pending">pending</option>
+        <option value="rejected">rejected</option>
+        <option value="disabled">disabled</option>
+      </select>
+    </span>
+    <button class="button sm" type="submit">Terapkan</button>
+    <button type="button" id="cancel-select-btn" class="button secondary sm">Batal</button>
   </form>
 
   <div class="table-wrap">
     <table>
-      <thead><tr><th style="width:2.2rem">Pilih</th><th>Pegawai &amp; Kelola</th><th>Admin Pusat</th><th>Akses Aplikasi (Role &amp; Approval)</th></tr></thead>
+      <thead><tr><th class="select-col"><input type="checkbox" id="select-all-cb" title="Pilih Semua" aria-label="Pilih Semua"></th><th>Pegawai &amp; Kelola</th><th>Admin Pusat</th><th>Akses Aplikasi (Role &amp; Approval)</th></tr></thead>
       <tbody>
         {{range .Users}}
         {{$uid := .ID}}
         <tr>
-          <td>
+          <td class="select-col">
             {{if not .IsDeleted}}
-            <input type="checkbox" form="bulk-form" name="user_ids" value="{{$uid}}" aria-label="Pilih {{.FullName}}">
+            <input type="checkbox" class="user-cb" form="bulk-form" name="user_ids" value="{{$uid}}" aria-label="Pilih {{.FullName}}">
             {{end}}
           </td>
           <td>
@@ -862,5 +879,62 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
     </table>
   </div>
 </section>
+<script nonce="{{.Nonce}}">
+(function(){
+  var sec = document.getElementById('users-section');
+  var toggleBtn = document.getElementById('toggle-select-btn');
+  var cancelBtn = document.getElementById('cancel-select-btn');
+  var bulkForm = document.getElementById('bulk-form');
+  var selectAll = document.getElementById('select-all-cb');
+  var countEl = document.getElementById('selected-count');
+  var actionSel = document.getElementById('bulk-action-select');
+  var memFields = document.getElementById('bulk-membership-fields');
+  if(!sec || !toggleBtn || !bulkForm) return;
+
+  function cbs(){ return Array.prototype.slice.call(sec.querySelectorAll('.user-cb')); }
+
+  function sync(){
+    var list = cbs();
+    var checked = list.filter(function(c){ return c.checked; }).length;
+    countEl.textContent = String(checked);
+    bulkForm.hidden = checked === 0;
+    if(selectAll){
+      selectAll.checked = list.length > 0 && checked === list.length;
+      selectAll.indeterminate = checked > 0 && checked < list.length;
+    }
+  }
+
+  function setSelectMode(on){
+    sec.classList.toggle('select-mode', on);
+    toggleBtn.textContent = on ? 'Tutup Pilihan' : 'Pilih';
+    if(!on){
+      cbs().forEach(function(c){ c.checked = false; });
+      sync();
+    }
+  }
+
+  toggleBtn.addEventListener('click', function(){
+    setSelectMode(!sec.classList.contains('select-mode'));
+  });
+  if(cancelBtn){
+    cancelBtn.addEventListener('click', function(){ setSelectMode(false); });
+  }
+  if(selectAll){
+    selectAll.addEventListener('change', function(){
+      var v = selectAll.checked;
+      cbs().forEach(function(c){ c.checked = v; });
+      sync();
+    });
+  }
+  sec.addEventListener('change', function(e){
+    if(e.target && e.target.classList.contains('user-cb')) sync();
+  });
+  if(actionSel && memFields){
+    actionSel.addEventListener('change', function(){
+      memFields.hidden = actionSel.value === 'delete';
+    });
+  }
+})();
+</script>
 {{end}}
 </main></body></html>`))
