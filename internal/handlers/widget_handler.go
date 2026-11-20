@@ -50,7 +50,7 @@ func (h *BrowserSSOHandler) PublicApps(c *fiber.Ctx) error {
 func (h *BrowserSSOHandler) AppSwitcherWidgetJS(c *fiber.Ctx) error {
 	c.Set("Access-Control-Allow-Origin", "*")
 	c.Set(fiber.HeaderCacheControl, "public, max-age=300")
-	c.Type("application/javascript", "utf-8")
+	c.Set(fiber.HeaderContentType, "application/javascript; charset=utf-8")
 
 	scheme := c.Protocol()
 	if xfProto := strings.TrimSpace(c.Get("X-Forwarded-Proto")); xfProto != "" {
