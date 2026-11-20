@@ -75,7 +75,7 @@ func (s *ApplicationContextService) GetByAppUserID(
 			ApplicationID:   application.ID,
 			Application:     application.Code,
 			ApplicationName: application.Name,
-			Role:            models.MembershipRoleUser,
+			Role:            "user",
 			Status:          models.MembershipStatusApproved,
 		}, nil
 	}
