@@ -557,7 +557,9 @@ func splitTrimmedCSV(raw string) []string {
 }
 
 const ssoAdminStyles = accountPortalStyles + `
-.tabs{display:inline-flex;gap:.35rem;padding:.3rem;border:1px solid var(--line);border-radius:.75rem;background:#fff;margin-bottom:1.5rem}
+.tabs-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:1.5rem}
+.tabs{display:inline-flex;gap:.35rem;padding:.3rem;border:1px solid var(--line);border-radius:.75rem;background:#fff}
+.tab-actions{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
 .tab{padding:.5rem 1rem;border-radius:.55rem;text-decoration:none;font-size:.86rem;font-weight:600;color:var(--muted)}
 .tab.active{background:var(--accent);color:#fff}
 .alert{padding:.8rem 1rem;border-radius:.75rem;margin-bottom:1.25rem;font-size:.88rem;font-weight:600}
@@ -605,14 +607,29 @@ th{font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mu
 .bulk-count{display:inline-flex;align-items:center;padding:.2rem .65rem;border-radius:999px;background:var(--accent);color:#fff;font-size:.76rem;font-weight:700}
 .bulk-fields{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .bulk-fields[hidden]{display:none}
+.sso-modal{border:1px solid var(--line);border-radius:1rem;padding:0;width:min(44rem,calc(100% - 2rem));max-height:calc(100vh - 2rem);box-shadow:0 24px 48px rgba(15,23,42,.22);background:#fff;margin:auto}
+.sso-modal::backdrop{background:rgba(15,23,42,.48);backdrop-filter:blur(2px)}
+.modal-head{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:1rem 1.25rem;border-bottom:1px solid var(--line);background:#f8fafc}
+.modal-head h3{margin:0;font-size:1rem;font-weight:700}
+.modal-close{border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:.5rem;width:2rem;height:2rem;font-size:1.15rem;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.modal-close:hover{background:#f1f5f9;color:#0f172a}
+.modal-body{padding:1.25rem;overflow-y:auto;max-height:calc(100vh - 7rem)}
 `
 
 var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Pusat SSO - BP3KP Sumatera II</title>` + accountPortalFavicon + `<style>` + ssoAdminStyles + `</style></head><body>` + accountPortalBrandHeader + `<div class="user-nav"><a class="button secondary sm" href="/">Portal Aplikasi</a><span class="user-chip"><span class="avatar" aria-hidden="true">A</span>{{.AdminName}}</span><a class="button secondary sm" href="/logout?portal=1&immediate=1">Keluar</a></div></div></header><main>
 <div class="section-head" style="margin-bottom:1rem"><div><h1>Admin Pusat SSO</h1><p class="lead">Kelola daftar website terhubung, role pengguna, dan persetujuan akses tanpa restart server.</p></div></div>
-<nav class="tabs" aria-label="Menu Admin SSO">
-  <a class="tab {{if eq .Tab "apps"}}active{{end}}" href="/admin/sso?tab=apps">Aplikasi &amp; Client SSO</a>
-  <a class="tab {{if eq .Tab "users"}}active{{end}}" href="/admin/sso?tab=users">Pengguna, Role &amp; Approval</a>
-</nav>
+<div class="tabs-row">
+  <nav class="tabs" aria-label="Menu Admin SSO">
+    <a class="tab {{if eq .Tab "apps"}}active{{end}}" href="/admin/sso?tab=apps">Aplikasi &amp; Client SSO</a>
+    <a class="tab {{if eq .Tab "users"}}active{{end}}" href="/admin/sso?tab=users">Pengguna, Role &amp; Approval</a>
+  </nav>
+  {{if eq .Tab "users"}}
+  <div class="tab-actions">
+    <button type="button" id="open-bulk-import-btn" class="button secondary sm">Bulk Import CSV</button>
+    <button type="button" id="open-create-user-btn" class="button sm">+ Tambah User</button>
+  </div>
+  {{end}}
+</div>
 {{if .Message}}<div class="alert ok" role="status">{{.Message}}</div>{{end}}
 {{if .Error}}<div class="alert err" role="alert">{{.Error}}</div>{{end}}
 
@@ -664,9 +681,12 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
   </div>
 </section>
 {{else}}
-<details class="drawer">
-  <summary>+ Tambah User Baru (Create Pegawai)</summary>
-  <div class="drawer-body">
+<dialog id="modal-create-user" class="sso-modal" aria-labelledby="modal-create-user-title">
+  <div class="modal-head">
+    <h3 id="modal-create-user-title">+ Tambah User Baru (Create Pegawai)</h3>
+    <button type="button" class="modal-close" data-close-modal="modal-create-user" aria-label="Tutup">&times;</button>
+  </div>
+  <div class="modal-body">
     <form method="post" action="/admin/sso/users/create" class="form-grid">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <div><label for="cu-email">Email Pegawai</label><input id="cu-email" name="email" type="email" placeholder="nama@bp3kpsumatera2.com" required></div>
@@ -681,14 +701,20 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
           {{range .Apps}}<label class="check-row"><input type="checkbox" name="app_ids" value="{{.ID}}"> {{.Name}}</label>{{end}}
         </div>
       </div>
-      <div class="full"><button class="button" type="submit">Simpan User Baru</button></div>
+      <div class="full" style="display:flex;gap:.5rem;justify-content:flex-end">
+        <button type="button" class="button secondary sm" data-close-modal="modal-create-user">Batal</button>
+        <button class="button sm" type="submit">Simpan User Baru</button>
+      </div>
     </form>
   </div>
-</details>
+</dialog>
 
-<details class="drawer">
-  <summary>Bulk Import User (Upload CSV / Paste Massal)</summary>
-  <div class="drawer-body">
+<dialog id="modal-bulk-import" class="sso-modal" aria-labelledby="modal-bulk-import-title">
+  <div class="modal-head">
+    <h3 id="modal-bulk-import-title">Bulk Import User (Upload CSV / Paste Massal)</h3>
+    <button type="button" class="modal-close" data-close-modal="modal-bulk-import" aria-label="Tutup">&times;</button>
+  </div>
+  <div class="modal-body">
     <p class="muted" style="margin-bottom:.85rem">Format per baris: <code>email,nama_lengkap,no_hp,password</code> (kolom <code>no_hp</code> dan <code>password</code> opsional; jika password kosong maka otomatis kirim undangan email).</p>
     <form method="post" action="/admin/sso/users/bulk-import" enctype="multipart/form-data" class="form-grid">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -700,10 +726,13 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
       </div>
       <div><label for="bi-role">Role</label><select id="bi-role" name="role"><option value="user">user</option><option value="admin">admin</option></select></div>
       <div><label for="bi-status">Status Approval</label><select id="bi-status" name="status"><option value="approved">approved</option><option value="pending">pending</option></select></div>
-      <div class="full"><button class="button" type="submit">Jalankan Bulk Import</button></div>
+      <div class="full" style="display:flex;gap:.5rem;justify-content:flex-end">
+        <button type="button" class="button secondary sm" data-close-modal="modal-bulk-import">Batal</button>
+        <button class="button sm" type="submit">Jalankan Bulk Import</button>
+      </div>
     </form>
   </div>
-</details>
+</dialog>
 
 <section class="panel-box">
   <h2>Atur Akses Pengguna ke Aplikasi</h2>
@@ -934,6 +963,24 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
       memFields.hidden = actionSel.value === 'delete';
     });
   }
+
+  function bindModal(btnId, modalId){
+    var btn = document.getElementById(btnId);
+    var dlg = document.getElementById(modalId);
+    if(!btn || !dlg || !dlg.showModal) return;
+    btn.addEventListener('click', function(){ dlg.showModal(); });
+    dlg.addEventListener('click', function(e){
+      if(e.target === dlg) dlg.close();
+    });
+  }
+  bindModal('open-create-user-btn', 'modal-create-user');
+  bindModal('open-bulk-import-btn', 'modal-bulk-import');
+  Array.prototype.slice.call(document.querySelectorAll('[data-close-modal]')).forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var dlg = document.getElementById(btn.getAttribute('data-close-modal'));
+      if(dlg && dlg.close) dlg.close();
+    });
+  });
 })();
 </script>
 {{end}}
