@@ -620,28 +620,60 @@ th{font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mu
 .modal-body{padding:1.25rem;overflow-y:auto;max-height:calc(100vh - 7rem)}
 .users-table td{vertical-align:middle}
 .row-actions{display:flex;gap:.35rem;justify-content:flex-end;align-items:center;white-space:nowrap}
+main{max-width:84rem}
+.admin-shell{display:grid;grid-template-columns:15.5rem minmax(0,1fr);gap:1.5rem;align-items:start}
+.admin-sidebar{position:sticky;top:1.25rem;background:#fff;border:1px solid var(--line);border-radius:1rem;padding:1rem;box-shadow:var(--shadow)}
+.side-title{font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:.2rem .65rem .65rem}
+.side-nav{display:flex;flex-direction:column;gap:.3rem}
+.side-link{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.62rem .8rem;border-radius:.65rem;text-decoration:none;font-size:.88rem;font-weight:600;color:var(--muted);transition:background .15s,color .15s}
+.side-link:hover{background:#f1f5f9;color:#0f172a}
+.side-link.active{background:var(--accent);color:#fff}
+.side-badge{font-size:.72rem;font-weight:700;padding:.12rem .48rem;border-radius:999px;background:rgba(15,23,42,.08);color:inherit}
+.side-link.active .side-badge{background:rgba(255,255,255,.22);color:#fff}
+.side-sep{border-top:1px solid var(--line);margin:.85rem 0 .65rem}
+.admin-content{min-width:0}
+.page-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:1rem;margin-bottom:1.25rem}
+.page-head h1{margin:0}
+@media(max-width:860px){.admin-shell{grid-template-columns:1fr}.admin-sidebar{position:static}}
 `
 
 var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Pusat SSO - BP3KP Sumatera II</title>` + accountPortalFavicon + `<style>` + ssoAdminStyles + `</style></head><body>` + accountPortalBrandHeader + `<div class="user-nav"><a class="button secondary sm" href="/">Portal Aplikasi</a><span class="user-chip"><span class="avatar" aria-hidden="true">A</span>{{.AdminName}}</span><a class="button secondary sm" href="/logout?portal=1&immediate=1">Keluar</a></div></div></header><main>
-<div class="section-head" style="margin-bottom:1rem"><div><h1>Admin Pusat SSO</h1><p class="lead">Kelola daftar website terhubung, role pengguna, dan persetujuan akses tanpa restart server.</p></div></div>
-<div class="tabs-row">
-  <nav class="tabs" aria-label="Menu Admin SSO">
-    <a class="tab {{if eq .Tab "apps"}}active{{end}}" href="/admin/sso?tab=apps">Aplikasi &amp; Client SSO</a>
-    <a class="tab {{if eq .Tab "users"}}active{{end}}" href="/admin/sso?tab=users">Pengguna &amp; Role Admin</a>
-  </nav>
-  {{if eq .Tab "apps"}}
-  <div class="tab-actions">
-    <button type="button" id="open-app-modal-btn" class="button">+ Tambah / Perbarui Aplikasi SSO</button>
-  </div>
-  {{else}}
-  <div class="tab-actions">
-    <button type="button" id="open-bulk-import-btn" class="button secondary sm">Bulk Import CSV</button>
-    <button type="button" id="open-create-user-btn" class="button sm">+ Tambah User</button>
-  </div>
-  {{end}}
-</div>
-{{if .Message}}<div class="alert ok" role="status">{{.Message}}</div>{{end}}
-{{if .Error}}<div class="alert err" role="alert">{{.Error}}</div>{{end}}
+<div class="admin-shell">
+  <aside class="admin-sidebar" aria-label="Menu Admin SSO">
+    <div class="side-title">Admin Pusat SSO</div>
+    <nav class="side-nav">
+      <a class="side-link {{if eq .Tab "apps"}}active{{end}}" href="/admin/sso?tab=apps"><span>Aplikasi &amp; Client SSO</span><span class="side-badge">{{len .Apps}}</span></a>
+      <a class="side-link {{if eq .Tab "users"}}active{{end}}" href="/admin/sso?tab=users"><span>Pengguna &amp; Role Admin</span></a>
+    </nav>
+    <div class="side-sep"></div>
+    <nav class="side-nav" aria-label="Tautan Cepat">
+      <a class="side-link" href="/"><span>&larr; Portal Aplikasi</span></a>
+    </nav>
+  </aside>
+  <div class="admin-content">
+    <div class="page-head">
+      <div>
+        {{if eq .Tab "apps"}}
+        <h1>Aplikasi &amp; Client SSO</h1>
+        <p class="lead">Kelola daftar website terhubung dan konfigurasi OAuth/SSO tanpa restart server.</p>
+        {{else}}
+        <h1>Pengguna &amp; Role Admin</h1>
+        <p class="lead">Semua pengguna otomatis mendapat role User; atur role Admin per aplikasi di sini.</p>
+        {{end}}
+      </div>
+      {{if eq .Tab "apps"}}
+      <div class="tab-actions">
+        <button type="button" id="open-app-modal-btn" class="button">+ Tambah / Perbarui Aplikasi SSO</button>
+      </div>
+      {{else}}
+      <div class="tab-actions">
+        <button type="button" id="open-bulk-import-btn" class="button secondary sm">Bulk Import CSV</button>
+        <button type="button" id="open-create-user-btn" class="button sm">+ Tambah User</button>
+      </div>
+      {{end}}
+    </div>
+    {{if .Message}}<div class="alert ok" role="status">{{.Message}}</div>{{end}}
+    {{if .Error}}<div class="alert err" role="alert">{{.Error}}</div>{{end}}
 
 {{if eq .Tab "apps"}}
 <dialog id="modal-app-form" class="sso-modal sso-modal-lg" aria-labelledby="modal-app-form-title">
@@ -1032,4 +1064,6 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
   });
 })();
 </script>
+  </div>
+</div>
 </main></body></html>`))
