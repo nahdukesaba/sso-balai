@@ -47,6 +47,7 @@ func Register(
 		app.Post("/admin/sso/users/update", browserSSOHandler.AdminSSOUpdateUser)
 		app.Post("/admin/sso/users/delete", browserSSOHandler.AdminSSODeleteUser)
 		app.Post("/admin/sso/users/restore", browserSSOHandler.AdminSSORestoreUser)
+		app.Get("/admin/sso/users/template.xlsx", browserSSOHandler.AdminSSODownloadUserTemplateXLSX)
 		app.Post("/admin/sso/users/bulk-import", browserSSOHandler.AdminSSOBulkImportUsers)
 		app.Post("/admin/sso/users/bulk-action", browserSSOHandler.AdminSSOBulkAction)
 	}

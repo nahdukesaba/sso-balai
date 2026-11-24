@@ -31,12 +31,32 @@ func (h *BrowserSSOHandler) DefaultLogoPNG(c *fiber.Ctx) error {
 }
 
 // PublicApps returns active applications with launch URLs and logos for the universal app-switcher widget.
+// Applications with RESTRICTED access_policy are only returned to authenticated users who hold an approved membership.
 func (h *BrowserSSOHandler) PublicApps(c *fiber.Ctx) error {
-	c.Set("Access-Control-Allow-Origin", "*")
+	if origin := strings.TrimSpace(c.Get("Origin")); origin != "" {
+		c.Set("Access-Control-Allow-Origin", origin)
+		c.Set("Access-Control-Allow-Credentials", "true")
+		c.Set("Vary", "Origin")
+	} else {
+		c.Set("Access-Control-Allow-Origin", "*")
+	}
 	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	c.Set(fiber.HeaderCacheControl, "public, max-age=60")
+	c.Set(fiber.HeaderCacheControl, "private, no-store")
 	if c.Method() == fiber.MethodOptions {
 		return c.SendStatus(fiber.StatusNoContent)
+	}
+
+	allowedRestricted := make(map[string]bool)
+	if h != nil && h.service != nil && h.portalService != nil {
+		if browserToken := strings.TrimSpace(c.Cookies(browserSSOSessionCookie)); browserToken != "" {
+			if identity, err := h.service.ResolveBrowserIdentity(c.UserContext(), browserToken); err == nil && identity != nil && identity.User != nil {
+				for _, card := range h.portalService.UserApplications(c.UserContext(), identity.User.ID) {
+					if card.Launchable {
+						allowedRestricted[strings.ToLower(strings.TrimSpace(card.Code))] = true
+					}
+				}
+			}
+		}
 	}
 
 	defaultLogo := requestOrigin(c) + "/widget/default-logo.png"
@@ -46,6 +66,10 @@ func (h *BrowserSSOHandler) PublicApps(c *fiber.Ctx) error {
 		if err == nil {
 			for _, a := range apps {
 				if !a.IsActive || strings.TrimSpace(a.LaunchURL) == "" {
+					continue
+				}
+				policy := strings.ToUpper(strings.TrimSpace(a.AccessPolicy))
+				if policy == "RESTRICTED" && !allowedRestricted[strings.ToLower(strings.TrimSpace(a.Code))] {
 					continue
 				}
 				logo := strings.TrimSpace(a.LogoURL)
@@ -148,7 +172,7 @@ const appSwitcherWidgetScript = `(function(){
       var self = this;
       var grid = this.shadowRoot.getElementById('grid');
       if (grid) grid.innerHTML = '<div class="loading">Memuat aplikasi...</div>';
-      fetch(this._ssoBase() + '/api/v1/public/apps')
+      fetch(this._ssoBase() + '/api/v1/public/apps', { credentials: 'include' })
         .then(function(r){ return r.json(); })
         .then(function(data){
           self._apps = Array.isArray(data.apps) ? data.apps : [];

@@ -84,14 +84,26 @@ SELECT
     a.code,
     a.name,
     COALESCE(m.role, 'user'),
-    COALESCE(m.status, 'approved'),
-    TRUE
+    CASE
+        WHEN UPPER(COALESCE(NULLIF(TRIM(a.access_policy), ''), 'AUTO_USER')) = 'AUTO_USER'
+            THEN COALESCE(m.status, 'approved')
+        ELSE COALESCE(m.status, 'pending')
+    END,
+    CASE
+        WHEN UPPER(COALESCE(NULLIF(TRIM(a.access_policy), ''), 'AUTO_USER')) = 'AUTO_USER'
+            THEN TRUE
+        ELSE (m.id IS NOT NULL)
+    END
 FROM public.applications a
 LEFT JOIN public.app_memberships m
     ON m.application_id = a.id
    AND m.app_user_id = $1
    AND m.deleted_at IS NULL
 WHERE a.is_active = true
+  AND (
+      UPPER(COALESCE(NULLIF(TRIM(a.access_policy), ''), 'AUTO_USER')) = 'AUTO_USER'
+      OR (m.id IS NOT NULL AND m.status = 'approved')
+  )
 ORDER BY a.name ASC
 `, appUserID)
 	if err != nil {

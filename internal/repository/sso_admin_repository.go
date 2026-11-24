@@ -29,6 +29,7 @@ type SSOAdminUserMembership struct {
 	ApplicationID   string
 	ApplicationCode string
 	ApplicationName string
+	AccessPolicy    string
 	Role            string
 	Status          string
 }
@@ -37,6 +38,7 @@ type SSOAdminUser struct {
 	ID          string
 	Email       string
 	FullName    string
+	Jabatan     string
 	Phone       string
 	AuthUserID  string
 	IsSSOAdmin  bool
@@ -129,6 +131,15 @@ func (r *SSOAdminRepository) UpsertApplication(ctx context.Context, app SSOAdmin
 		policy = "AUTO_USER"
 	}
 
+	var prevPolicy string
+	_ = r.pool.QueryRow(
+		ctx,
+		`SELECT UPPER(COALESCE(NULLIF(TRIM(access_policy), ''), 'AUTO_USER'))
+		 FROM public.applications
+		 WHERE code = $1`,
+		code,
+	).Scan(&prevPolicy)
+
 	var appID string
 	err := r.pool.QueryRow(
 		ctx,
@@ -167,7 +178,23 @@ func (r *SSOAdminRepository) UpsertApplication(ctx context.Context, app SSOAdmin
 		return err
 	}
 
-	// Ensure all Central SSO Admins automatically get approved admin access to every app.
+	if policy == "RESTRICTED" {
+		// When newly set to Private Mode, revoke existing auto-memberships so all users start uninvited.
+		if prevPolicy != "RESTRICTED" {
+			if _, err := r.pool.Exec(
+				ctx,
+				`UPDATE public.app_memberships
+				 SET status = 'disabled'
+				 WHERE application_id = $1::uuid AND deleted_at IS NULL`,
+				appID,
+			); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// Ensure all Central SSO Admins automatically get approved admin access to public apps.
 	_, err = r.pool.Exec(
 		ctx,
 		`INSERT INTO public.app_memberships (app_user_id, application_id, role, status)
@@ -193,10 +220,10 @@ func (r *SSOAdminRepository) ListUsers(ctx context.Context, search string, filte
 
 	rows, err := r.pool.Query(
 		ctx,
-		`SELECT id::text, email, full_name, COALESCE(phone, ''), COALESCE(auth_user_id::text, ''), COALESCE(is_sso_admin, false), (deleted_at IS NOT NULL)
+		`SELECT id::text, email, full_name, COALESCE(jabatan, ''), COALESCE(phone, ''), COALESCE(auth_user_id::text, ''), COALESCE(is_sso_admin, false), (deleted_at IS NOT NULL)
 		 FROM public.app_users
 		 WHERE `+whereDeleted+`
-		   AND ($1 = '%%' OR lower(email) LIKE $1 OR lower(full_name) LIKE $1)
+		   AND ($1 = '%%' OR lower(email) LIKE $1 OR lower(full_name) LIKE $1 OR lower(COALESCE(jabatan, '')) LIKE $1)
 		 ORDER BY (deleted_at IS NOT NULL) ASC, is_sso_admin DESC, full_name ASC, email ASC
 		 LIMIT 200`,
 		q,
@@ -210,7 +237,7 @@ func (r *SSOAdminRepository) ListUsers(ctx context.Context, search string, filte
 	userIndex := make(map[string]int)
 	for rows.Next() {
 		var u SSOAdminUser
-		if err := rows.Scan(&u.ID, &u.Email, &u.FullName, &u.Phone, &u.AuthUserID, &u.IsSSOAdmin, &u.IsDeleted); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.FullName, &u.Jabatan, &u.Phone, &u.AuthUserID, &u.IsSSOAdmin, &u.IsDeleted); err != nil {
 			return nil, err
 		}
 		userIndex[u.ID] = len(users)
@@ -230,8 +257,15 @@ func (r *SSOAdminRepository) ListUsers(ctx context.Context, search string, filte
 			a.id::text,
 			a.code,
 			a.name,
+			UPPER(COALESCE(NULLIF(TRIM(a.access_policy), ''), 'AUTO_USER')),
 			COALESCE(m.role, 'user'),
-			COALESCE(m.status, 'approved')
+			COALESCE(
+				m.status,
+				CASE
+					WHEN UPPER(COALESCE(NULLIF(TRIM(a.access_policy), ''), 'AUTO_USER')) = 'AUTO_USER' THEN 'approved'
+					ELSE 'disabled'
+				END
+			)
 		 FROM public.app_users u
 		 CROSS JOIN public.applications a
 		 LEFT JOIN public.app_memberships m
@@ -254,6 +288,7 @@ func (r *SSOAdminRepository) ListUsers(ctx context.Context, search string, filte
 			&mem.ApplicationID,
 			&mem.ApplicationCode,
 			&mem.ApplicationName,
+			&mem.AccessPolicy,
 			&mem.Role,
 			&mem.Status,
 		); err != nil {
@@ -329,11 +364,27 @@ func (r *SSOAdminRepository) GetUserByID(ctx context.Context, appUserID string) 
 	var u SSOAdminUser
 	err := r.pool.QueryRow(
 		ctx,
-		`SELECT id::text, email, full_name, COALESCE(phone, ''), COALESCE(auth_user_id::text, ''), COALESCE(is_sso_admin, false), (deleted_at IS NOT NULL)
+		`SELECT id::text, email, full_name, COALESCE(jabatan, ''), COALESCE(phone, ''), COALESCE(auth_user_id::text, ''), COALESCE(is_sso_admin, false), (deleted_at IS NOT NULL)
 		 FROM public.app_users
 		 WHERE id = $1::uuid`,
 		strings.TrimSpace(appUserID),
-	).Scan(&u.ID, &u.Email, &u.FullName, &u.Phone, &u.AuthUserID, &u.IsSSOAdmin, &u.IsDeleted)
+	).Scan(&u.ID, &u.Email, &u.FullName, &u.Jabatan, &u.Phone, &u.AuthUserID, &u.IsSSOAdmin, &u.IsDeleted)
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (r *SSOAdminRepository) GetUserByEmail(ctx context.Context, email string) (*SSOAdminUser, error) {
+	var u SSOAdminUser
+	err := r.pool.QueryRow(
+		ctx,
+		`SELECT id::text, email, full_name, COALESCE(jabatan, ''), COALESCE(phone, ''), COALESCE(auth_user_id::text, ''), COALESCE(is_sso_admin, false), (deleted_at IS NOT NULL)
+		 FROM public.app_users
+		 WHERE lower(email) = $1
+		 LIMIT 1`,
+		strings.ToLower(strings.TrimSpace(email)),
+	).Scan(&u.ID, &u.Email, &u.FullName, &u.Jabatan, &u.Phone, &u.AuthUserID, &u.IsSSOAdmin, &u.IsDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -344,22 +395,25 @@ func (r *SSOAdminRepository) UpsertUser(
 	ctx context.Context,
 	email string,
 	fullName string,
+	jabatan string,
 	phone string,
 	authUserID string,
 	isSSOAdmin bool,
 ) (string, error) {
 	cleanEmail := strings.ToLower(strings.TrimSpace(email))
 	cleanName := strings.TrimSpace(fullName)
+	cleanJabatan := strings.TrimSpace(jabatan)
 	cleanPhone := strings.TrimSpace(phone)
 	cleanAuthID := strings.TrimSpace(authUserID)
 
 	var appUserID string
 	err := r.pool.QueryRow(
 		ctx,
-		`INSERT INTO public.app_users (id, email, full_name, phone, auth_user_id, is_sso_admin)
-		 VALUES (gen_random_uuid(), $1, $2, NULLIF($3, ''), NULLIF($4, '')::uuid, $5)
+		`INSERT INTO public.app_users (id, email, full_name, jabatan, phone, auth_user_id, is_sso_admin)
+		 VALUES (gen_random_uuid(), $1, $2, $3, NULLIF($4, ''), NULLIF($5, '')::uuid, $6)
 		 ON CONFLICT (email) DO UPDATE SET
 			full_name = CASE WHEN EXCLUDED.full_name <> '' THEN EXCLUDED.full_name ELSE public.app_users.full_name END,
+			jabatan = CASE WHEN EXCLUDED.jabatan <> '' THEN EXCLUDED.jabatan ELSE public.app_users.jabatan END,
 			phone = COALESCE(EXCLUDED.phone, public.app_users.phone),
 			auth_user_id = COALESCE(EXCLUDED.auth_user_id, public.app_users.auth_user_id),
 			is_sso_admin = CASE WHEN EXCLUDED.is_sso_admin THEN true ELSE public.app_users.is_sso_admin END,
@@ -367,6 +421,7 @@ func (r *SSOAdminRepository) UpsertUser(
 		 RETURNING id::text`,
 		cleanEmail,
 		cleanName,
+		cleanJabatan,
 		cleanPhone,
 		cleanAuthID,
 		isSSOAdmin,
@@ -386,19 +441,61 @@ func (r *SSOAdminRepository) UpdateUserProfile(
 	ctx context.Context,
 	appUserID string,
 	fullName string,
+	jabatan string,
 	phone string,
 ) error {
 	_, err := r.pool.Exec(
 		ctx,
 		`UPDATE public.app_users
 		 SET full_name = $2,
-		     phone = NULLIF($3, '')
+		     jabatan = $3,
+		     phone = NULLIF($4, '')
 		 WHERE id = $1::uuid AND deleted_at IS NULL`,
 		strings.TrimSpace(appUserID),
 		strings.TrimSpace(fullName),
+		strings.TrimSpace(jabatan),
 		strings.TrimSpace(phone),
 	)
 	return err
+}
+
+// BackfillUserMissingFields fills empty full_name, jabatan, or phone on an existing user
+// without overwriting fields that are already populated.
+func (r *SSOAdminRepository) BackfillUserMissingFields(
+	ctx context.Context,
+	appUserID string,
+	fullName string,
+	jabatan string,
+	phone string,
+) (bool, error) {
+	cleanName := strings.TrimSpace(fullName)
+	cleanJabatan := strings.TrimSpace(jabatan)
+	cleanPhone := strings.TrimSpace(phone)
+	if cleanName == "" && cleanJabatan == "" && cleanPhone == "" {
+		return false, nil
+	}
+
+	tag, err := r.pool.Exec(
+		ctx,
+		`UPDATE public.app_users
+		 SET full_name = CASE WHEN COALESCE(TRIM(full_name), '') = '' AND $2 <> '' THEN $2 ELSE full_name END,
+		     jabatan = CASE WHEN COALESCE(TRIM(jabatan), '') = '' AND $3 <> '' THEN $3 ELSE jabatan END,
+		     phone = CASE WHEN COALESCE(TRIM(phone), '') = '' AND $4 <> '' THEN $4 ELSE phone END
+		 WHERE id = $1::uuid
+		   AND (
+		     (COALESCE(TRIM(full_name), '') = '' AND $2 <> '') OR
+		     (COALESCE(TRIM(jabatan), '') = '' AND $3 <> '') OR
+		     (COALESCE(TRIM(phone), '') = '' AND $4 <> '')
+		   )`,
+		strings.TrimSpace(appUserID),
+		cleanName,
+		cleanJabatan,
+		cleanPhone,
+	)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 func (r *SSOAdminRepository) SoftDeleteUser(ctx context.Context, appUserID string) error {

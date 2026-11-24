@@ -1,11 +1,9 @@
 package handlers
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/csv"
 	"encoding/hex"
 	"fmt"
 	"html/template"
@@ -22,7 +20,10 @@ import (
 	"github.com/nahdukesaba/sso-balai/internal/services"
 )
 
-const ssoAdminCSRFCookie = "balai_sso_admin_csrf"
+const (
+	ssoAdminCSRFCookie     = "balai_sso_admin_csrf"
+	defaultSSOUserPassword = "balaisumut"
+)
 
 func (h *BrowserSSOHandler) SetAdminRepository(repo *repository.SSOAdminRepository) {
 	if h != nil {
@@ -104,7 +105,7 @@ func (h *BrowserSSOHandler) AdminSSOPage(c *fiber.Ctx) error {
 		nonce = csrf[:16]
 	}
 	setAccountPortalPageHeaders(c)
-	c.Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'nonce-"+nonce+"'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+	c.Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data: https:; style-src 'unsafe-inline'; script-src 'nonce-"+nonce+"'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 	var out strings.Builder
 	ssoOrigin := requestOrigin(c)
 	err = ssoAdminTemplate.Execute(&out, struct {
@@ -327,9 +328,11 @@ func (h *BrowserSSOHandler) provisionAuthAndAppUser(
 	c *fiber.Ctx,
 	email string,
 	fullName string,
+	jabatan string,
 	phone string,
 	password string,
 	isSSOAdmin bool,
+	updateExistingAuthPassword bool,
 ) (string, error) {
 	cleanEmail := strings.ToLower(strings.TrimSpace(email))
 	if cleanEmail == "" || !strings.Contains(cleanEmail, "@") {
@@ -344,7 +347,7 @@ func (h *BrowserSSOHandler) provisionAuthAndAppUser(
 		existing, _ := h.adminAuth.FindUserByEmail(c.UserContext(), cleanEmail)
 		if existing != nil && existing.ID != "" {
 			authUserID = existing.ID
-			if password != "" {
+			if updateExistingAuthPassword && password != "" {
 				_ = h.adminAuth.UpdateUser(c.UserContext(), authUserID, fullName, password)
 			}
 		} else if password != "" {
@@ -362,7 +365,7 @@ func (h *BrowserSSOHandler) provisionAuthAndAppUser(
 		}
 	}
 
-	return h.adminRepo.UpsertUser(c.UserContext(), cleanEmail, fullName, phone, authUserID, isSSOAdmin)
+	return h.adminRepo.UpsertUser(c.UserContext(), cleanEmail, fullName, jabatan, phone, authUserID, isSSOAdmin)
 }
 
 func (h *BrowserSSOHandler) AdminSSOCreateUser(c *fiber.Ctx) error {
@@ -376,15 +379,19 @@ func (h *BrowserSSOHandler) AdminSSOCreateUser(c *fiber.Ctx) error {
 
 	email := strings.ToLower(strings.TrimSpace(c.FormValue("email")))
 	fullName := strings.TrimSpace(c.FormValue("full_name"))
+	jabatan := strings.TrimSpace(c.FormValue("jabatan"))
 	phone := strings.TrimSpace(c.FormValue("phone"))
 	password := c.FormValue("password")
+	if strings.TrimSpace(password) == "" {
+		password = defaultSSOUserPassword
+	}
 	isSSOAdmin := c.FormValue("is_sso_admin") == "on" || c.FormValue("is_sso_admin") == "true"
 
-	if password != "" && len(password) < 8 {
-		return c.Redirect("/admin/sso?tab=users&err="+url.QueryEscape("Password minimal 8 karakter (atau kosongkan untuk kirim undangan email)."), fiber.StatusSeeOther)
+	if len(password) < 8 {
+		return c.Redirect("/admin/sso?tab=users&err="+url.QueryEscape("Password minimal 8 karakter."), fiber.StatusSeeOther)
 	}
 
-	appUserID, err := h.provisionAuthAndAppUser(c, email, fullName, phone, password, isSSOAdmin)
+	appUserID, err := h.provisionAuthAndAppUser(c, email, fullName, jabatan, phone, password, isSSOAdmin, true)
 	if err != nil {
 		return c.Redirect("/admin/sso?tab=users&err="+url.QueryEscape("Gagal membuat user: "+err.Error()), fiber.StatusSeeOther)
 	}
@@ -414,6 +421,7 @@ func (h *BrowserSSOHandler) AdminSSOUpdateUser(c *fiber.Ctx) error {
 
 	userID := strings.TrimSpace(c.FormValue("app_user_id"))
 	fullName := strings.TrimSpace(c.FormValue("full_name"))
+	jabatan := strings.TrimSpace(c.FormValue("jabatan"))
 	phone := strings.TrimSpace(c.FormValue("phone"))
 	newPassword := c.FormValue("new_password")
 	search := strings.TrimSpace(c.FormValue("q"))
@@ -430,7 +438,7 @@ func (h *BrowserSSOHandler) AdminSSOUpdateUser(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Redirect("/admin/sso?tab=users&q="+url.QueryEscape(search)+"&err="+url.QueryEscape("User tidak ditemukan."), fiber.StatusSeeOther)
 	}
-	if err := h.adminRepo.UpdateUserProfile(c.UserContext(), userID, fullName, phone); err != nil {
+	if err := h.adminRepo.UpdateUserProfile(c.UserContext(), userID, fullName, jabatan, phone); err != nil {
 		return c.Redirect("/admin/sso?tab=users&q="+url.QueryEscape(search)+"&err="+url.QueryEscape("Gagal memperbarui profil user."), fiber.StatusSeeOther)
 	}
 	if h.adminAuth != nil && user.AuthUserID != "" {
@@ -482,6 +490,21 @@ func (h *BrowserSSOHandler) AdminSSORestoreUser(c *fiber.Ctx) error {
 	return c.Redirect("/admin/sso?tab=users&q="+url.QueryEscape(search)+"&msg="+url.QueryEscape("User berhasil dipulihkan."), fiber.StatusSeeOther)
 }
 
+func (h *BrowserSSOHandler) AdminSSODownloadUserTemplateXLSX(c *fiber.Ctx) error {
+	_, _, ok := h.requireSSOAdmin(c)
+	if !ok {
+		return nil
+	}
+	data, err := buildUserImportTemplateXLSX()
+	if err != nil {
+		return browserSSOError(c, fiber.StatusInternalServerError, "template_error", "Gagal membuat template Excel.")
+	}
+	c.Set(fiber.HeaderContentType, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Set(fiber.HeaderContentDisposition, `attachment; filename="template-import-user-sso.xlsx"`)
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	return c.Send(data)
+}
+
 func (h *BrowserSSOHandler) AdminSSOBulkImportUsers(c *fiber.Ctx) error {
 	_, _, ok := h.requireSSOAdmin(c)
 	if !ok {
@@ -491,61 +514,91 @@ func (h *BrowserSSOHandler) AdminSSOBulkImportUsers(c *fiber.Ctx) error {
 		return c.Redirect("/admin/sso?tab=users&err="+url.QueryEscape("Sesi form kedaluwarsa, silakan coba lagi."), fiber.StatusSeeOther)
 	}
 
-	rawText := strings.TrimSpace(c.FormValue("csv_text"))
-	if fileHeader, err := c.FormFile("csv_file"); err == nil && fileHeader != nil && fileHeader.Size > 0 {
-		f, openErr := fileHeader.Open()
-		if openErr == nil {
-			defer f.Close()
-			if data, readErr := io.ReadAll(io.LimitReader(f, 2<<20)); readErr == nil {
-				if trimmed := strings.TrimSpace(string(data)); trimmed != "" {
-					rawText = trimmed
+	var filename string
+	var fileBytes []byte
+	for _, field := range []string{"excel_file", "csv_file"} {
+		fileHeader, err := c.FormFile(field)
+		if err == nil && fileHeader != nil && fileHeader.Size > 0 {
+			f, openErr := fileHeader.Open()
+			if openErr == nil {
+				data, readErr := io.ReadAll(io.LimitReader(f, 5<<20))
+				_ = f.Close()
+				if readErr == nil && len(data) > 0 {
+					filename = fileHeader.Filename
+					fileBytes = data
+					break
 				}
 			}
 		}
 	}
-
-	if rawText == "" {
-		return c.Redirect("/admin/sso?tab=users&err="+url.QueryEscape("Masukkan data CSV atau pilih file .csv terlebih dahulu."), fiber.StatusSeeOther)
+	if len(fileBytes) == 0 {
+		if rawText := strings.TrimSpace(c.FormValue("csv_text")); rawText != "" {
+			filename = "import.csv"
+			fileBytes = []byte(rawText)
+		}
+	}
+	if len(fileBytes) == 0 {
+		return c.Redirect("/admin/sso?tab=users&err="+url.QueryEscape("Pilih file Excel (.xlsx) terlebih dahulu."), fiber.StatusSeeOther)
 	}
 
-	rawText = strings.TrimPrefix(rawText, "\ufeff")
-	comma := ','
-	if strings.Contains(strings.SplitN(rawText, "\n", 2)[0], ";") && !strings.Contains(strings.SplitN(rawText, "\n", 2)[0], ",") {
-		comma = ';'
-	}
-	reader := csv.NewReader(bytes.NewBufferString(rawText))
-	reader.Comma = comma
-	reader.FieldsPerRecord = -1
-	reader.TrimLeadingSpace = true
-
-	records, err := reader.ReadAll()
+	rows, err := parseUserImportSpreadsheet(filename, fileBytes)
 	if err != nil {
-		return c.Redirect("/admin/sso?tab=users&err="+url.QueryEscape("Format CSV tidak valid: "+err.Error()), fiber.StatusSeeOther)
+		return c.Redirect("/admin/sso?tab=users&err="+url.QueryEscape("Gagal membaca file Excel: "+err.Error()), fiber.StatusSeeOther)
+	}
+	if len(rows) == 0 {
+		return c.Redirect("/admin/sso?tab=users&err="+url.QueryEscape("Tidak ada baris data user yang ditemukan di file."), fiber.StatusSeeOther)
 	}
 
 	targetAppID := strings.TrimSpace(c.FormValue("application_id"))
 	targetRole := strings.TrimSpace(c.FormValue("role"))
 	targetStatus := strings.TrimSpace(c.FormValue("status"))
 
-	var okCount, failCount int
-	for idx, row := range records {
-		if len(row) < 2 {
+	var createdCount, updatedCount, skippedCount, failCount int
+	for _, row := range rows {
+		if row.Email == "" || !strings.Contains(row.Email, "@") {
+			failCount++
 			continue
 		}
-		email := strings.TrimSpace(row[0])
-		fullName := strings.TrimSpace(row[1])
-		if idx == 0 && (strings.EqualFold(email, "email") || strings.Contains(strings.ToLower(fullName), "nama")) {
+
+		existing, findErr := h.adminRepo.GetUserByEmail(c.UserContext(), row.Email)
+		if findErr == nil && existing != nil {
+			// Existing user: never duplicate or change password; backfill only empty fields (e.g. jabatan).
+			filled, fillErr := h.adminRepo.BackfillUserMissingFields(
+				c.UserContext(),
+				existing.ID,
+				row.FullName,
+				row.Jabatan,
+				row.Phone,
+			)
+			if fillErr != nil {
+				failCount++
+				continue
+			}
+			if targetAppID != "" {
+				_ = h.adminRepo.UpsertMembership(c.UserContext(), existing.ID, targetAppID, targetRole, targetStatus)
+			}
+			if filled {
+				updatedCount++
+			} else {
+				skippedCount++
+			}
 			continue
 		}
-		phone := ""
-		password := ""
-		if len(row) >= 3 {
-			phone = strings.TrimSpace(row[2])
+
+		if row.FullName == "" {
+			failCount++
+			continue
 		}
-		if len(row) >= 4 {
-			password = strings.TrimSpace(row[3])
-		}
-		uid, err := h.provisionAuthAndAppUser(c, email, fullName, phone, password, false)
+		uid, err := h.provisionAuthAndAppUser(
+			c,
+			row.Email,
+			row.FullName,
+			row.Jabatan,
+			row.Phone,
+			defaultSSOUserPassword,
+			false,
+			false,
+		)
 		if err != nil {
 			failCount++
 			continue
@@ -553,10 +606,17 @@ func (h *BrowserSSOHandler) AdminSSOBulkImportUsers(c *fiber.Ctx) error {
 		if targetAppID != "" {
 			_ = h.adminRepo.UpsertMembership(c.UserContext(), uid, targetAppID, targetRole, targetStatus)
 		}
-		okCount++
+		createdCount++
 	}
 
-	msg := fmt.Sprintf("Bulk import selesai: %d user berhasil diproses, %d gagal.", okCount, failCount)
+	msg := fmt.Sprintf(
+		"Import Excel selesai: %d user baru (password default: %s), %d dilengkapi jabatannya/datanya, %d sudah lengkap dilewati, %d gagal.",
+		createdCount,
+		defaultSSOUserPassword,
+		updatedCount,
+		skippedCount,
+		failCount,
+	)
 	return c.Redirect("/admin/sso?tab=users&msg="+url.QueryEscape(msg), fiber.StatusSeeOther)
 }
 
@@ -627,7 +687,14 @@ func splitTrimmedCSV(raw string) []string {
 	parts := strings.Split(raw, ",")
 	var out []string
 	for _, p := range parts {
-		if trimmed := strings.TrimSpace(p); trimmed != "" {
+		trimmed := strings.TrimSpace(p)
+		for strings.HasPrefix(strings.ToLower(trimmed), "%20") {
+			trimmed = strings.TrimSpace(trimmed[3:])
+		}
+		for strings.HasSuffix(strings.ToLower(trimmed), "%20") {
+			trimmed = strings.TrimSpace(trimmed[:len(trimmed)-3])
+		}
+		if trimmed != "" {
 			out = append(out, trimmed)
 		}
 	}
@@ -720,7 +787,28 @@ main{width:100%;max-width:none;padding:1.5rem 1.75rem 3rem}
 @media(max-width:860px){.admin-shell{grid-template-columns:1fr}.admin-sidebar{position:static;min-height:auto}.side-sep{margin:.85rem 0 .65rem;padding-top:0}}
 `
 
-var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Pusat SSO - BP3KP Sumatera II</title>` + accountPortalFavicon + `<style>` + ssoAdminStyles + `</style></head><body>` + accountPortalBrandHeader + `<div class="user-nav"><a class="button secondary sm" href="/">Portal Aplikasi</a><span class="user-chip"><span class="avatar" aria-hidden="true">A</span>{{.AdminName}}</span><a class="button secondary sm" href="/logout?portal=1&immediate=1">Keluar</a></div></div></header><main>
+func safeLogoSrc(raw string) template.URL {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "/widget/default-logo.png"
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "data:image/png;base64,") ||
+		strings.HasPrefix(lower, "data:image/jpeg;base64,") ||
+		strings.HasPrefix(lower, "data:image/webp;base64,") ||
+		strings.HasPrefix(lower, "data:image/gif;base64,") ||
+		strings.HasPrefix(lower, "data:image/svg+xml;base64,") ||
+		strings.HasPrefix(lower, "https://") ||
+		strings.HasPrefix(lower, "http://") ||
+		strings.HasPrefix(trimmed, "/") {
+		return template.URL(trimmed)
+	}
+	return "/widget/default-logo.png"
+}
+
+var ssoAdminTemplate = template.Must(template.New("sso-admin").Funcs(template.FuncMap{
+	"safeLogoSrc": safeLogoSrc,
+}).Parse(`<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Pusat SSO - BP3KP Sumatera II</title>` + accountPortalFavicon + `<style>` + ssoAdminStyles + `</style></head><body>` + accountPortalBrandHeader + `<div class="user-nav"><a class="button secondary sm" href="/">Portal Aplikasi</a><span class="user-chip"><span class="avatar" aria-hidden="true">A</span>{{.AdminName}}</span><a class="button secondary sm" href="/logout?portal=1&immediate=1">Keluar</a></div></div></header><main>
 <div class="admin-shell">
   <aside class="admin-sidebar" aria-label="Menu Admin SSO">
     <div class="side-title">Admin Pusat SSO</div>
@@ -754,7 +842,8 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
       </div>
       {{else if eq .Tab "users"}}
       <div class="tab-actions">
-        <button type="button" id="open-bulk-import-btn" class="button secondary sm">Bulk Import CSV</button>
+        <a href="/admin/sso/users/template.xlsx" class="button secondary sm">Download Template Excel</a>
+        <button type="button" id="open-bulk-import-btn" class="button secondary sm">Import Excel</button>
         <button type="button" id="open-create-user-btn" class="button sm">+ Tambah User</button>
       </div>
       {{end}}
@@ -784,6 +873,13 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
         <div class="full"><label for="app-desc">Deskripsi Singkat</label><input id="app-desc" name="description" placeholder="Portal pengelolaan arsip resmi BP3KP Sumatera II"></div>
         <div><label for="app-logo-url">URL Logo (opsional, kosong = Logo BP3KP)</label><input id="app-logo-url" name="logo_url" placeholder="https://.../logo.png"></div>
         <div><label for="app-logo-file">Atau Upload Logo (maks 256 KB)</label><input id="app-logo-file" name="logo_file" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"></div>
+        <div class="full">
+          <label for="app-access-policy">Mode Akses Aplikasi</label>
+          <select id="app-access-policy" name="access_policy">
+            <option value="AUTO_USER">Publik — Semua user SSO otomatis punya akses</option>
+            <option value="RESTRICTED">Private Mode — Hanya user yang diundang (Invite Only)</option>
+          </select>
+        </div>
         <div class="full"><label class="check-row"><input id="app-active" type="checkbox" name="is_active" checked> Aplikasi Aktif di SSO</label></div>
       </div>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1.1rem">
@@ -804,7 +900,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
         <tr>
           <td>
             <div style="display:flex;align-items:center;gap:.65rem">
-              <img src="{{if .LogoURL}}{{.LogoURL}}{{else}}/widget/default-logo.png{{end}}" alt="" style="width:2.1rem;height:2.1rem;border-radius:.5rem;object-fit:contain;background:#f8fafc;border:1px solid var(--line);padding:.2rem;flex-shrink:0">
+              <img src="{{safeLogoSrc .LogoURL}}" alt="" style="width:2.1rem;height:2.1rem;border-radius:.5rem;object-fit:contain;background:#f8fafc;border:1px solid var(--line);padding:.2rem;flex-shrink:0">
               <div><strong>{{.Name}}</strong><div class="muted" style="font-size:.78rem">{{.Code}}{{if .LaunchURL}} · {{.LaunchURL}}{{end}}</div></div>
             </div>
           </td>
@@ -817,13 +913,14 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
           </td>
           <td><code>{{.ClientID}}</code></td>
           <td style="max-width:22rem;word-break:break-all;font-size:.78rem">{{.RedirectURIsCSV}}</td>
-          <td>{{if .IsActive}}<span class="pill approved">Aktif</span>{{else}}<span class="pill disabled">Nonaktif</span>{{end}}</td>
+          <td>{{if .IsActive}}<span class="pill approved">Aktif</span>{{else}}<span class="pill disabled">Nonaktif</span>{{end}} {{if eq .AccessPolicy "RESTRICTED"}}<span class="pill admin">Private</span>{{end}}</td>
           <td>
             <div class="row-actions">
               <button type="button" class="button secondary sm edit-app-btn"
                 data-code="{{.Code}}"
                 data-name="{{.Name}}"
                 data-client-id="{{.ClientID}}"
+                data-access-policy="{{.AccessPolicy}}"
                 data-launch-url="{{.LaunchURL}}"
                 data-redirect-uris="{{.RedirectURIsCSV}}"
                 data-logout-uris="{{.PostLogoutRedirectURIsCSV}}"
@@ -909,8 +1006,9 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <div><label for="cu-email">Email Pegawai</label><input id="cu-email" name="email" type="email" placeholder="nama@bp3kpsumatera2.com" required></div>
       <div><label for="cu-name">Nama Lengkap</label><input id="cu-name" name="full_name" placeholder="Nama lengkap pegawai" required></div>
+      <div><label for="cu-jabatan">Jabatan (opsional)</label><input id="cu-jabatan" name="jabatan" placeholder="mis. Kepala Seksi Perencanaan"></div>
       <div><label for="cu-phone">No. HP (opsional)</label><input id="cu-phone" name="phone" placeholder="0812..."></div>
-      <div><label for="cu-pass">Password (min 8 karakter, kosong = kirim invite)</label><input id="cu-pass" name="password" type="password" minlength="8" placeholder="Kosongkan untuk kirim email undangan"></div>
+      <div class="full"><label for="cu-pass">Password (min 8 karakter, default: balaisumut)</label><input id="cu-pass" name="password" type="password" minlength="8" value="balaisumut" placeholder="Default: balaisumut"></div>
       <div class="full"><label class="check-row"><input type="checkbox" name="is_sso_admin"> Jadikan Admin Pusat SSO</label></div>
       <div class="full" style="display:flex;gap:.5rem;justify-content:flex-end">
         <button type="button" class="button secondary sm" data-close-modal="modal-create-user">Batal</button>
@@ -922,16 +1020,18 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
 
 <dialog id="modal-bulk-import" class="sso-modal" aria-labelledby="modal-bulk-import-title">
   <div class="modal-head">
-    <h3 id="modal-bulk-import-title">Bulk Import User (Upload CSV / Paste Massal)</h3>
+    <h3 id="modal-bulk-import-title">Import User via Excel (.xlsx)</h3>
     <button type="button" class="modal-close" data-close-modal="modal-bulk-import" aria-label="Tutup">&times;</button>
   </div>
   <div class="modal-body">
-    <p class="muted" style="margin-bottom:.85rem">Format per baris: <code>email,nama_lengkap,no_hp,password</code> (kolom <code>no_hp</code> dan <code>password</code> opsional; jika password kosong maka otomatis kirim undangan email). Semua user otomatis mendapat akses <strong>user</strong> ke semua aplikasi.</p>
+    <p class="muted" style="margin-bottom:.75rem">Kolom template: <code>email</code>, <code>nama_lengkap</code>, <code>jabatan</code>, <code>no_hp</code> (tanpa kolom password — user baru otomatis memakai password default <strong>balaisumut</strong>). Jika email sudah ada di database, user <strong>tidak diduplikat</strong> dan password lama tidak diubah; kolom <strong>jabatan</strong> atau data yang masih kosong akan otomatis dilengkapi.</p>
+    <div style="margin-bottom:.9rem">
+      <a href="/admin/sso/users/template.xlsx" class="button secondary sm">Download Template Excel (.xlsx)</a>
+    </div>
     <form method="post" action="/admin/sso/users/bulk-import" enctype="multipart/form-data" class="form-grid">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <input type="hidden" name="status" value="approved">
-      <div class="full"><label for="bi-file">Upload File .csv (opsional)</label><input id="bi-file" name="csv_file" type="file" accept=".csv,text/csv"></div>
-      <div class="full"><label for="bi-text">Atau Paste Data CSV di Sini</label><textarea id="bi-text" name="csv_text" rows="4" placeholder="budi@bp3kpsumatera2.com,Budi Santoso,08123456789,Password123!&#10;sari@bp3kpsumatera2.com,Sari Dewi,08129876543,"></textarea></div>
+      <div class="full"><label for="bi-file">Upload File Excel (.xlsx)</label><input id="bi-file" name="excel_file" type="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required></div>
       <div>
         <label for="bi-app">Assign Role Khusus di Aplikasi (opsional)</label>
         <select id="bi-app" name="application_id"><option value="">-- Tidak perlu (semua default user) --</option>{{range .Apps}}<option value="{{.ID}}">{{.Name}} ({{.Code}})</option>{{end}}</select>
@@ -939,7 +1039,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
       <div><label for="bi-role">Role</label><select id="bi-role" name="role"><option value="user">user</option><option value="admin">admin</option></select></div>
       <div class="full" style="display:flex;gap:.5rem;justify-content:flex-end">
         <button type="button" class="button secondary sm" data-close-modal="modal-bulk-import">Batal</button>
-        <button class="button sm" type="submit">Jalankan Bulk Import</button>
+        <button class="button sm" type="submit">Upload &amp; Proses Excel</button>
       </div>
     </form>
   </div>
@@ -949,7 +1049,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
   <h2 style="margin-bottom:.75rem">Daftar Pengguna (<span id="visible-user-count">{{len .Users}}</span>)</h2>
   <form id="user-filter-form" method="get" action="/admin/sso" class="search-bar">
     <input type="hidden" name="tab" value="users">
-    <input id="live-search-input" name="q" value="{{.Search}}" placeholder="Cari nama atau email pegawai..." autocomplete="off">
+    <input id="live-search-input" name="q" value="{{.Search}}" placeholder="Cari nama, email, atau jabatan pegawai..." autocomplete="off">
     <select id="user-filter-select" name="filter" aria-label="Filter Status User">
       <option value="active" {{if eq .Filter "active"}}selected{{end}}>User Aktif</option>
       <option value="deleted" {{if eq .Filter "deleted"}}selected{{end}}>User Terhapus</option>
@@ -984,11 +1084,11 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
 
   <div class="table-wrap">
     <table class="users-table">
-      <thead><tr><th class="select-col"><input type="checkbox" id="select-all-cb" title="Pilih Semua" aria-label="Pilih Semua"></th><th>Pengguna</th><th>Admin Pusat</th><th>Role Aplikasi</th><th style="text-align:right">Aksi</th></tr></thead>
+      <thead><tr><th class="select-col"><input type="checkbox" id="select-all-cb" title="Pilih Semua" aria-label="Pilih Semua"></th><th>Pengguna</th><th>Jabatan</th><th>Admin Pusat</th><th>Role Aplikasi</th><th style="text-align:right">Aksi</th></tr></thead>
       <tbody id="users-tbody">
         {{range .Users}}
         {{$uid := .ID}}
-        <tr class="user-row" data-search="{{.FullName}} {{.Email}} {{.Phone}}">
+        <tr class="user-row" data-search="{{.FullName}} {{.Email}} {{.Jabatan}} {{.Phone}}">
           <td class="select-col">
             {{if not .IsDeleted}}
             <input type="checkbox" class="user-cb" form="bulk-form" name="user_ids" value="{{$uid}}" aria-label="Pilih {{.FullName}}">
@@ -999,6 +1099,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
             {{if .IsDeleted}}<span class="pill disabled">Terhapus</span>{{end}}
             <div class="muted" style="font-size:.78rem">{{.Email}}{{if .Phone}} · {{.Phone}}{{end}}</div>
           </td>
+          <td>{{if .Jabatan}}<span style="font-size:.84rem">{{.Jabatan}}</span>{{else}}<span class="muted" style="font-size:.8rem">-</span>{{end}}</td>
           <td>
             {{if not .IsDeleted}}
             <form method="post" action="/admin/sso/users/superadmin" class="inline-form">
@@ -1048,7 +1149,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
           </td>
         </tr>
         {{end}}
-        <tr id="no-search-results" hidden><td colspan="5" class="muted" style="text-align:center;padding:1.25rem">Tidak ada pengguna yang cocok.</td></tr>
+        <tr id="no-search-results" hidden><td colspan="6" class="muted" style="text-align:center;padding:1.25rem">Tidak ada pengguna yang cocok.</td></tr>
       </tbody>
     </table>
   </div>
@@ -1070,6 +1171,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
         <input type="hidden" name="q" value="{{$.Search}}">
         <input type="hidden" name="filter" value="{{$.Filter}}">
         <div class="full"><label>Nama Lengkap</label><input name="full_name" value="{{.FullName}}" required></div>
+        <div class="full"><label>Jabatan</label><input name="jabatan" value="{{.Jabatan}}" placeholder="mis. Kepala Seksi Perencanaan"></div>
         <div><label>No. HP</label><input name="phone" value="{{.Phone}}"></div>
         <div><label>Password Baru (opsional, min 8 char)</label><input name="new_password" type="password" minlength="8" placeholder="Kosongkan jika tidak ganti"></div>
         <div class="full" style="display:flex;gap:.5rem;justify-content:flex-end">
@@ -1094,13 +1196,20 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
           <input type="hidden" name="app_user_id" value="{{$uid}}">
           <input type="hidden" name="application_id" value="{{.ApplicationID}}">
-          <input type="hidden" name="status" value="approved">
+          {{if ne .AccessPolicy "RESTRICTED"}}<input type="hidden" name="status" value="approved">{{end}}
           <input type="hidden" name="q" value="{{$.Search}}">
           <span>
             <strong>{{.ApplicationName}}</strong>
-            {{if eq .Role "admin"}}<span class="pill admin">admin</span>{{else}}<span class="pill">user</span>{{end}}
+            {{if eq .AccessPolicy "RESTRICTED"}}<span class="pill">Private</span>{{end}}
+            {{if and (eq .AccessPolicy "RESTRICTED") (ne .Status "approved")}}<span class="pill disabled">Belum Diundang</span>{{else if eq .Role "admin"}}<span class="pill admin">admin</span>{{else}}<span class="pill approved">user</span>{{end}}
           </span>
           <span class="inline-form">
+            {{if eq .AccessPolicy "RESTRICTED"}}
+            <select name="status" aria-label="Status Undangan">
+              <option value="disabled" {{if ne .Status "approved"}}selected{{end}}>Tidak Diundang</option>
+              <option value="approved" {{if eq .Status "approved"}}selected{{end}}>Diundang</option>
+            </select>
+            {{end}}
             <select name="role" aria-label="Role">
               <option value="user" {{if eq .Role "user"}}selected{{end}}>user</option>
               <option value="admin" {{if eq .Role "admin"}}selected{{end}}>admin</option>
@@ -1230,6 +1339,8 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
     document.getElementById('app-logout').value = vals.logoutUris || '';
     document.getElementById('app-desc').value = vals.description || '';
     document.getElementById('app-logo-url').value = vals.logoUrl || '';
+    var apSel = document.getElementById('app-access-policy');
+    if(apSel) apSel.value = vals.accessPolicy || 'AUTO_USER';
     var lf = document.getElementById('app-logo-file');
     if(lf) lf.value = '';
     document.getElementById('app-active').checked = vals.active !== false;
@@ -1246,6 +1357,7 @@ var ssoAdminTemplate = template.Must(template.New("sso-admin").Parse(`<!doctype 
         code: btn.getAttribute('data-code'),
         name: btn.getAttribute('data-name'),
         clientId: btn.getAttribute('data-client-id'),
+        accessPolicy: btn.getAttribute('data-access-policy'),
         port: btn.getAttribute('data-port'),
         backendPort: btn.getAttribute('data-backend-port'),
         launchUrl: btn.getAttribute('data-launch-url'),

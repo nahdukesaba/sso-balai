@@ -206,7 +206,11 @@ Buat halaman atau endpoint callback sesuai ` + "`SSO_REDIRECT_URI`" + ` (` + "`_
 
 ### Parameter Query yang Diterima di Callback
 - **Sukses**: ` + "`?code=<authorization_code>&state=<state>`" + `
-- **Gagal / Ditolak**: ` + "`?status=pending|denied&state=<state>`" + `
+- **Gagal / Ditolak (opsional fallback)**: ` + "`?status=pending|denied&state=<state>`" + `
+
+> **Penting — Penanganan Akses Ditolak / Private App (` + "`status`" + ` atau ` + "`code`" + ` kosong):**
+> - Secara default, jika user belum diundang ke aplikasi Private (` + "`RESTRICTED`" + `) atau aksesnya ditolak, Central SSO (` + "`__SSO_ORIGIN__`" + `) akan langsung menampilkan halaman **"Belum Mendapat Izin Akses / Akses Ditolak"** yang seragam.
+> - Namun sebagai penjagaan di route callback website target: **JANGAN memanggil ` + "`/api/v1/auth/sso/exchange`" + ` apabila ` + "`status=pending`" + `, ` + "`status=denied`" + `, atau ` + "`code`" + ` kosong**. Tampilkan pesan yang ramah sesuai tema website (*"Akun Anda belum memiliki izin untuk mengakses aplikasi ini. Silakan hubungi Admin Pusat SSO."*) beserta tombol kembali ke Beranda / Portal SSO (` + "`__SSO_ORIGIN__/`" + `).
 
 ### Langkah 3.1 — Validasi ` + "`state`" + ` & Tukar ` + "`code`" + ` ke ` + "`/api/v1/auth/sso/exchange`" + `
 1. Pastikan ` + "`state`" + ` dari query URL **sama persis** dengan ` + "`bp3kp_sso_state`" + ` yang disimpan sebelumnya.

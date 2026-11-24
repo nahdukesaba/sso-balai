@@ -77,15 +77,14 @@ func (h *BrowserSSOHandler) Authorize(c *fiber.Ctx) error {
 	if strings.TrimSpace(browserToken) != "" {
 		result, authErr := h.service.Authorize(c.UserContext(), request, browserToken)
 		if authErr == nil && !result.LoginRequired {
+			if result.Code == "" {
+				return h.renderAccessDeniedPage(c, request.ClientID, result.RedirectURI, result.Status)
+			}
 			redirect, parseErr := url.Parse(result.RedirectURI)
 			if parseErr == nil {
 				query := redirect.Query()
 				query.Set("state", result.State)
-				if result.Code != "" {
-					query.Set("code", result.Code)
-				} else {
-					query.Set("status", result.Status)
-				}
+				query.Set("code", result.Code)
 				redirect.RawQuery = query.Encode()
 				return c.Redirect(redirect.String(), fiber.StatusFound)
 			}
@@ -110,19 +109,91 @@ func (h *BrowserSSOHandler) ContinueAuthorize(c *fiber.Ctx) error {
 	if result.LoginRequired {
 		return c.Redirect("/?request="+url.QueryEscape(sealed), fiber.StatusFound)
 	}
+	if result.Code == "" {
+		return h.renderAccessDeniedPage(c, request.ClientID, result.RedirectURI, result.Status)
+	}
 	redirect, err := url.Parse(result.RedirectURI)
 	if err != nil {
 		return browserSSOError(c, fiber.StatusBadRequest, "invalid_redirect_uri", "Invalid SSO redirect URI.")
 	}
 	query := redirect.Query()
 	query.Set("state", result.State)
-	if result.Code != "" {
-		query.Set("code", result.Code)
-	} else {
-		query.Set("status", result.Status)
-	}
+	query.Set("code", result.Code)
 	redirect.RawQuery = query.Encode()
 	return c.Redirect(redirect.String(), fiber.StatusFound)
+}
+
+func (h *BrowserSSOHandler) renderAccessDeniedPage(
+	c *fiber.Ctx,
+	clientID string,
+	redirectURI string,
+	status string,
+) error {
+	appName := "aplikasi ini"
+	launchURL := ""
+	if h != nil && h.adminRepo != nil {
+		if apps, err := h.adminRepo.ListApplications(c.UserContext()); err == nil {
+			for _, a := range apps {
+				if strings.EqualFold(strings.TrimSpace(a.ClientID), strings.TrimSpace(clientID)) {
+					if strings.TrimSpace(a.Name) != "" {
+						appName = strings.TrimSpace(a.Name)
+					}
+					if u := strings.TrimSpace(a.LaunchURL); strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://") {
+						launchURL = u
+					}
+					break
+				}
+			}
+		}
+	}
+	if launchURL == "" {
+		if parsed, err := url.Parse(strings.TrimSpace(redirectURI)); err == nil &&
+			(parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Host != "" {
+			launchURL = parsed.Scheme + "://" + parsed.Host + "/"
+		}
+	}
+
+	badge := "Akses Ditolak"
+	heading := "Akses Aplikasi Tidak Tersedia"
+	desc := fmt.Sprintf(
+		"Akun Anda saat ini tidak memiliki izin aktif untuk mengakses aplikasi <strong>%s</strong>. Silakan hubungi Admin Pusat SSO BP3KP Sumatera II apabila ini merupakan kekeliruan.",
+		template.HTMLEscapeString(appName),
+	)
+	if strings.EqualFold(strings.TrimSpace(status), "pending") {
+		badge = "Akses Terbatas (Private)"
+		heading = "Belum Mendapat Izin Akses"
+		desc = fmt.Sprintf(
+			"Akun Anda belum diundang untuk mengakses aplikasi <strong>%s</strong>. Aplikasi ini bersifat privat dan hanya dapat dibuka oleh pengguna yang telah diberikan izin oleh Admin Pusat SSO BP3KP Sumatera II.",
+			template.HTMLEscapeString(appName),
+		)
+	}
+
+	var backBtn string
+	if launchURL != "" {
+		backBtn = fmt.Sprintf(
+			`<a class="button" href="%s">Kembali ke %s</a>`,
+			template.HTMLEscapeString(launchURL),
+			template.HTMLEscapeString(appName),
+		)
+	}
+
+	setAccountPortalPageHeaders(c)
+	c.Status(fiber.StatusForbidden)
+	return c.SendString(`<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>` +
+		template.HTMLEscapeString(heading) + ` - SSO BP3KP Sumatera II</title>` +
+		accountPortalFavicon + `<style>` + accountPortalStyles +
+		`.denied-badge{display:inline-flex;align-items:center;gap:.4rem;padding:.32rem .8rem;border-radius:999px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;font-size:.76rem;font-weight:700;margin-bottom:.85rem}` +
+		`.denied-actions{display:flex;flex-wrap:wrap;gap:.65rem;justify-content:center;margin-top:1.5rem}` +
+		`</style></head><body>` + accountPortalBrandHeader +
+		`</div></header>` +
+		`<div class="auth-wrap"><div class="auth-card" style="text-align:center;max-width:30rem">` +
+		`<span class="denied-badge">` + template.HTMLEscapeString(badge) + `</span>` +
+		`<h1 style="font-size:1.45rem;margin-bottom:.65rem">` + template.HTMLEscapeString(heading) + `</h1>` +
+		`<p class="lead" style="font-size:.92rem">` + desc + `</p>` +
+		`<div class="denied-actions">` +
+		backBtn +
+		`<a class="button secondary" href="/logout?portal=1">Ganti Akun</a>` +
+		`</div></div></div></body></html>`)
 }
 
 func (h *BrowserSSOHandler) authorizeRequest(c *fiber.Ctx) (models.BrowserSSOAuthorizeRequest, string, error) {

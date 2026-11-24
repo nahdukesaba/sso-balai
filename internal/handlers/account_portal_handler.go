@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	_ "embed"
 	"encoding/base64"
+	"fmt"
 	"html/template"
 	"net/url"
 	"strings"
@@ -84,8 +85,8 @@ func (h *BrowserSSOHandler) PortalLoginPage(c *fiber.Ctx) error {
 	if err != nil {
 		return browserSSOError(c, fiber.StatusInternalServerError, "portal_unavailable", "Account portal is unavailable.")
 	}
-	h.setCookie(c, accountPortalLoginCSRF, csrf, 600, time.Time{})
-	return renderAccountPortalLogin(c, csrf, pendingRequest, "")
+	h.setCookie(c, accountPortalLoginCSRF, csrf, 3600, time.Time{})
+	return h.renderAccountPortalLogin(c, csrf, pendingRequest, "")
 }
 
 func (h *BrowserSSOHandler) PortalLoginSubmit(c *fiber.Ctx) error {
@@ -96,6 +97,15 @@ func (h *BrowserSSOHandler) PortalLoginSubmit(c *fiber.Ctx) error {
 	pendingRequest := strings.TrimSpace(c.FormValue("request"))
 	cookieCSRF := strings.TrimSpace(c.Cookies(accountPortalLoginCSRF))
 	if csrf == "" || cookieCSRF == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(cookieCSRF)) != 1 {
+		if view, viewErr := h.portalService.View(c.UserContext(), c.Cookies(browserSSOSessionCookie), pendingRequest); viewErr == nil &&
+			view != nil && view.Identity != nil && view.Identity.User != nil {
+			return c.Redirect(portalURL(pendingRequest), fiber.StatusSeeOther)
+		}
+		if newCSRF, csrfErr := services.RandomBrowserSSOToken(32); csrfErr == nil {
+			h.setCookie(c, accountPortalLoginCSRF, newCSRF, 3600, time.Time{})
+			c.Status(fiber.StatusForbidden)
+			return h.renderAccountPortalLogin(c, newCSRF, pendingRequest, "Sesi formulir login kedaluwarsa. Silakan coba masuk kembali.")
+		}
 		return browserSSOError(c, fiber.StatusForbidden, "invalid_csrf", "The login form expired. Try again.")
 	}
 	rawToken, expiresAt, err := h.portalService.Login(
@@ -104,7 +114,7 @@ func (h *BrowserSSOHandler) PortalLoginSubmit(c *fiber.Ctx) error {
 		c.FormValue("password"),
 	)
 	if err != nil {
-		return renderAccountPortalLogin(c, csrf, pendingRequest, "Email atau password tidak valid.")
+		return h.renderAccountPortalLogin(c, csrf, pendingRequest, "Email atau password tidak valid.")
 	}
 	h.setSessionCookie(c, rawToken, expiresAt)
 	h.clearCookie(c, accountPortalLoginCSRF)
@@ -115,7 +125,7 @@ func portalURL(pendingRequest string) string {
 	if strings.TrimSpace(pendingRequest) == "" {
 		return "/"
 	}
-	return "/?request=" + url.QueryEscape(pendingRequest)
+	return "/authorize/continue?request=" + url.QueryEscape(pendingRequest)
 }
 
 func renderAccountPortalLoggedOut(c *fiber.Ctx, view *models.AccountPortalView) error {
@@ -134,8 +144,18 @@ func renderAccountPortalLoggedIn(c *fiber.Ctx, view *models.AccountPortalView) e
 	return c.SendString(output.String())
 }
 
-func renderAccountPortalLogin(c *fiber.Ctx, csrf string, request string, message string) error {
+func (h *BrowserSSOHandler) renderAccountPortalLogin(c *fiber.Ctx, csrf string, request string, message string) error {
 	setAccountPortalPageHeaders(c)
+	if h != nil && h.service != nil && strings.TrimSpace(request) != "" {
+		if authReq, err := h.service.OpenAuthorizeRequest(request); err == nil {
+			if origin, originErr := browserSSORedirectOrigin(authReq.RedirectURI); originErr == nil && origin != "" {
+				c.Set("Content-Security-Policy", fmt.Sprintf(
+					"default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; form-action 'self' %s; base-uri 'none'; frame-ancestors 'none'",
+					origin,
+				))
+			}
+		}
+	}
 	var output strings.Builder
 	if err := accountPortalLoginTemplate.Execute(&output, struct {
 		CSRF    string
