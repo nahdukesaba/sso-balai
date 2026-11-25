@@ -38,8 +38,7 @@ var forgotPasswordPageHTML = `<!doctype html>
       </form>
       <p id="message" role="status" aria-live="polite"></p>
       <div class="form-foot">
-        <span class="muted" style="font-size:.84rem;margin:0">Sudah ingat password?</span>
-        <a class="footer-link" href="/account/login">Login</a>
+        <a class="footer-link" href="/account/login">Ingat Password?</a>
       </div>
     </section>
   </div>

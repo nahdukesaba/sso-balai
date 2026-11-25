@@ -40,7 +40,7 @@ func TestCentralForgotPasswordPageUsesExistingRecoveryAPI(t *testing.T) {
 		"<h1>Lupa Password</h1>",
 		`<label for="email">Email</label>`,
 		`<button id="submit" type="submit">Kirim</button>`,
-		`href="/account/login">Login</a>`,
+		`href="/account/login">Ingat Password?</a>`,
 		"Mengirim...",
 		"Permintaan Tidak Dapat Diproses !",
 		"Jika email terdaftar, instruksi reset password akan dikirim",
