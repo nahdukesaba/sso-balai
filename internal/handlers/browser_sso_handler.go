@@ -27,6 +27,7 @@ const (
 type BrowserSSOHandler struct {
 	service        *services.BrowserSSOService
 	portalService  *services.AccountPortalService
+	authService    *services.AuthService
 	adminRepo      *repository.SSOAdminRepository
 	adminAuth      *services.SupabaseAdminService
 	cookieSecure   bool
@@ -37,6 +38,12 @@ type BrowserSSOHandler struct {
 func (h *BrowserSSOHandler) SetAccountPortalService(service *services.AccountPortalService) {
 	if h != nil {
 		h.portalService = service
+	}
+}
+
+func (h *BrowserSSOHandler) SetAuthService(service *services.AuthService) {
+	if h != nil {
+		h.authService = service
 	}
 }
 

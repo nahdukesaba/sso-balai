@@ -30,10 +30,9 @@ func (h *BrowserSSOHandler) DefaultLogoPNG(c *fiber.Ctx) error {
 	return c.Send(accountPortalLogoPNG)
 }
 
-// PublicApps returns active applications with launch URLs and logos for the universal app-switcher widget.
-// Applications with RESTRICTED access_policy are only returned to authenticated users who hold an approved membership.
-func (h *BrowserSSOHandler) PublicApps(c *fiber.Ctx) error {
-	if origin := strings.TrimSpace(c.Get("Origin")); origin != "" {
+func setWidgetCORSHeaders(c *fiber.Ctx) {
+	origin := strings.TrimSpace(c.Get("Origin"))
+	if origin != "" {
 		c.Set("Access-Control-Allow-Origin", origin)
 		c.Set("Access-Control-Allow-Credentials", "true")
 		c.Set("Vary", "Origin")
@@ -41,35 +40,67 @@ func (h *BrowserSSOHandler) PublicApps(c *fiber.Ctx) error {
 		c.Set("Access-Control-Allow-Origin", "*")
 	}
 	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	c.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept")
+}
+
+func (h *BrowserSSOHandler) resolveAuthenticatedWidgetUserID(c *fiber.Ctx) string {
+	if h == nil {
+		return ""
+	}
+	if h.service != nil {
+		if browserToken := strings.TrimSpace(c.Cookies(browserSSOSessionCookie)); browserToken != "" {
+			if identity, err := h.service.ResolveBrowserIdentity(c.UserContext(), browserToken); err == nil && identity != nil && identity.User != nil {
+				if uid := strings.TrimSpace(identity.User.ID); uid != "" {
+					return uid
+				}
+			}
+		}
+	}
+	if h.authService != nil {
+		parts := strings.Fields(strings.TrimSpace(c.Get(fiber.HeaderAuthorization)))
+		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") && strings.TrimSpace(parts[1]) != "" {
+			if identity, err := h.authService.AuthenticateAccessToken(c.UserContext(), parts[1]); err == nil && identity != nil && identity.User != nil {
+				if uid := strings.TrimSpace(identity.User.ID); uid != "" {
+					return uid
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// PublicApps returns active applications with launch URLs and logos that the authenticated user is approved to access.
+func (h *BrowserSSOHandler) PublicApps(c *fiber.Ctx) error {
+	setWidgetCORSHeaders(c)
 	c.Set(fiber.HeaderCacheControl, "private, no-store")
 	if c.Method() == fiber.MethodOptions {
 		return c.SendStatus(fiber.StatusNoContent)
 	}
 
-	allowedRestricted := make(map[string]bool)
-	if h != nil && h.service != nil && h.portalService != nil {
-		if browserToken := strings.TrimSpace(c.Cookies(browserSSOSessionCookie)); browserToken != "" {
-			if identity, err := h.service.ResolveBrowserIdentity(c.UserContext(), browserToken); err == nil && identity != nil && identity.User != nil {
-				for _, card := range h.portalService.UserApplications(c.UserContext(), identity.User.ID) {
-					if card.Launchable {
-						allowedRestricted[strings.ToLower(strings.TrimSpace(card.Code))] = true
-					}
-				}
-			}
-		}
+	appUserID := h.resolveAuthenticatedWidgetUserID(c)
+	if appUserID == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error":          "unauthorized",
+			"message":        "Autentikasi diperlukan untuk memuat daftar aplikasi.",
+			"defaultLogoUrl": requestOrigin(c) + "/widget/default-logo.png",
+			"apps":           []publicAppItem{},
+		})
 	}
 
 	defaultLogo := requestOrigin(c) + "/widget/default-logo.png"
 	var items []publicAppItem
 	if h != nil && h.adminRepo != nil {
-		apps, err := h.adminRepo.ListApplications(c.UserContext())
+		apps, err := h.adminRepo.ListApprovedUserApplications(c.UserContext(), appUserID)
 		if err == nil {
 			for _, a := range apps {
-				if !a.IsActive || strings.TrimSpace(a.LaunchURL) == "" {
+				if !a.IsActive {
 					continue
 				}
-				policy := strings.ToUpper(strings.TrimSpace(a.AccessPolicy))
-				if policy == "RESTRICTED" && !allowedRestricted[strings.ToLower(strings.TrimSpace(a.Code))] {
+				launchURL := strings.TrimSpace(a.LaunchURL)
+				if launchURL == "" && h.portalService != nil {
+					launchURL = strings.TrimSpace(h.portalService.ConfiguredLaunchURL(a.Code))
+				}
+				if launchURL == "" {
 					continue
 				}
 				logo := strings.TrimSpace(a.LogoURL)
@@ -79,10 +110,29 @@ func (h *BrowserSSOHandler) PublicApps(c *fiber.Ctx) error {
 				items = append(items, publicAppItem{
 					Code:      a.Code,
 					Name:      a.Name,
-					LaunchURL: a.LaunchURL,
+					LaunchURL: launchURL,
 					LogoURL:   logo,
 				})
 			}
+		}
+	} else if h != nil && h.portalService != nil {
+		for _, card := range h.portalService.UserApplications(c.UserContext(), appUserID) {
+			if !card.Launchable {
+				continue
+			}
+			launchURL := strings.TrimSpace(h.portalService.ConfiguredLaunchURL(card.Code))
+			if launchURL == "" {
+				launchURL = strings.TrimSpace(card.LaunchURL)
+			}
+			if launchURL == "" {
+				continue
+			}
+			items = append(items, publicAppItem{
+				Code:      card.Code,
+				Name:      card.Name,
+				LaunchURL: launchURL,
+				LogoURL:   defaultLogo,
+			})
 		}
 	}
 	if items == nil {
@@ -116,14 +166,26 @@ const appSwitcherWidgetScript = `(function(){
   }
 
   class Bp3kpAppSwitcher extends HTMLElement {
+    static get observedAttributes() {
+      return ['sso-url', 'current-app', 'apps-endpoint', 'access-token', 'apps-json'];
+    }
+
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
       this._open = false;
       this._apps = null;
       this._defaultLogo = null;
+      this._unauthorized = false;
       this._onDocClick = this._handleDocClick.bind(this);
       this._onKeyDown = this._handleKeyDown.bind(this);
+    }
+
+    attributeChangedCallback(name, oldVal, newVal) {
+      if (oldVal === newVal) return;
+      this._apps = null;
+      this._unauthorized = false;
+      if (this._open) this._loadApps();
     }
 
     connectedCallback() {
@@ -139,6 +201,12 @@ const appSwitcherWidgetScript = `(function(){
 
     _ssoBase() {
       return (this.getAttribute('sso-url') || detectedOrigin).replace(/\/+$/, '');
+    }
+
+    _appsEndpoint() {
+      var custom = (this.getAttribute('apps-endpoint') || '').trim();
+      if (custom) return custom;
+      return this._ssoBase() + '/api/v1/auth/apps';
     }
 
     _handleDocClick(e) {
@@ -171,11 +239,37 @@ const appSwitcherWidgetScript = `(function(){
     _loadApps() {
       var self = this;
       var grid = this.shadowRoot.getElementById('grid');
+      var inlineJson = (this.getAttribute('apps-json') || '').trim();
+      if (inlineJson) {
+        try {
+          var parsed = JSON.parse(inlineJson);
+          self._apps = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.apps) ? parsed.apps : []);
+          self._defaultLogo = (parsed && parsed.defaultLogoUrl) || (self._ssoBase() + '/widget/default-logo.png');
+          self._unauthorized = false;
+          self._renderGrid();
+          return;
+        } catch (_) {}
+      }
       if (grid) grid.innerHTML = '<div class="loading">Memuat aplikasi...</div>';
-      fetch(this._ssoBase() + '/api/v1/public/apps', { credentials: 'include' })
-        .then(function(r){ return r.json(); })
+      var token = (this.getAttribute('access-token') || '').trim();
+      var headers = { 'Accept': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      fetch(this._appsEndpoint(), { credentials: 'include', headers: headers })
+        .then(function(r){
+          if (r.status === 401 || r.status === 403) {
+            self._unauthorized = true;
+            self._apps = [];
+            return null;
+          }
+          return r.json();
+        })
         .then(function(data){
-          self._apps = Array.isArray(data.apps) ? data.apps : [];
+          if (!data) {
+            self._renderGrid();
+            return;
+          }
+          self._unauthorized = false;
+          self._apps = Array.isArray(data.apps) ? data.apps : (Array.isArray(data.data) ? data.data : []);
           self._defaultLogo = data.defaultLogoUrl || (self._ssoBase() + '/widget/default-logo.png');
           self._renderGrid();
         })
@@ -187,6 +281,10 @@ const appSwitcherWidgetScript = `(function(){
     _renderGrid() {
       var grid = this.shadowRoot.getElementById('grid');
       if (!grid) return;
+      if (this._unauthorized) {
+        grid.innerHTML = '<div class="loading">Silakan masuk dan pastikan akses aplikasi telah disetujui.</div>';
+        return;
+      }
       var current = (this.getAttribute('current-app') || '').toLowerCase();
       var base = this._ssoBase();
       var fallbackLogo = this._defaultLogo || (base + '/widget/default-logo.png');
@@ -194,9 +292,13 @@ const appSwitcherWidgetScript = `(function(){
       var apps = this._apps || [];
       for (var i = 0; i < apps.length; i++) {
         var a = apps[i];
+        if (a && a.launchable === false) continue;
+        var launchHref = (a && a.launchUrl) || '';
+        if (!launchHref) continue;
+        if (launchHref.charAt(0) === '/') launchHref = base + launchHref;
         var logo = a.logoUrl || fallbackLogo;
         var isCurrent = current && String(a.code || '').toLowerCase() === current;
-        html += '<a class="tile' + (isCurrent ? ' current' : '') + '" href="' + esc(a.launchUrl) + '" target="_blank" rel="noopener">'
+        html += '<a class="tile' + (isCurrent ? ' current' : '') + '" href="' + esc(launchHref) + '" target="_blank" rel="noopener">'
           + '<span class="logo-box"><img src="' + esc(logo) + '" alt="' + esc(a.name) + '" loading="lazy"></span>'
           + '<span class="tile-label">' + esc(a.name) + '</span>'
           + '</a>';

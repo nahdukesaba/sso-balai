@@ -518,3 +518,47 @@ func TestImmediateLogoutAndSessionEndpoint(t *testing.T) {
 		t.Fatalf("expected cleared session cookie, got %#v", clearedCookie)
 	}
 }
+
+func TestWidgetAppsRequiresAuthenticationAndFiltersApprovedOnly(t *testing.T) {
+	session := &models.BrowserSSOSession{
+		ID:         "test-session-id",
+		AuthUserID: "auth-user",
+		AppUserID:  "app-user",
+		ExpiresAt:  time.Now().Add(time.Hour),
+	}
+	handler, _, _ := newAccountPortalHandler(t, session, nil, []models.PortalApplicationAccess{
+		{Code: "silapet", Name: "SILAPET", Status: models.MembershipStatusApproved, HasMembership: true},
+		{Code: "klinik_pkp", Name: "Klinik PKP", Status: models.MembershipStatusPending, HasMembership: true},
+		{Code: "arsiparis", Name: "Arsiparis", Status: models.MembershipStatusRejected, HasMembership: true},
+	})
+	app := fiber.New()
+	app.Get("/api/v1/auth/apps", handler.PublicApps)
+	app.Get("/api/v1/public/apps", handler.PublicApps)
+
+	unauthReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/apps", nil)
+	unauthResp, err := app.Test(unauthReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unauthResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated widget apps request, got %d", unauthResp.StatusCode)
+	}
+
+	authReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/apps", nil)
+	authReq.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: "opaque-session"})
+	authResp, err := app.Test(authReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for authenticated widget apps request, got %d", authResp.StatusCode)
+	}
+	body, _ := io.ReadAll(authResp.Body)
+	raw := string(body)
+	if !strings.Contains(raw, `"code":"silapet"`) {
+		t.Fatalf("expected approved app silapet in response, got %s", raw)
+	}
+	if strings.Contains(raw, `"code":"klinik_pkp"`) || strings.Contains(raw, `"code":"arsiparis"`) {
+		t.Fatalf("unapproved apps leaked into widget apps response: %s", raw)
+	}
+}

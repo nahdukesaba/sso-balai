@@ -348,6 +348,7 @@ func main() {
 		cfg.SSOBrowserSessionTTL,
 	)
 	browserSSOHandler.SetAccountPortalService(accountPortalService)
+	browserSSOHandler.SetAuthService(authService)
 	browserSSOHandler.SetAdminRepository(ssoAdminRepository)
 	browserSSOHandler.SetAdminAuthService(supabaseAdminService)
 	authMiddleware := middleware.NewAuthMiddleware(authService)
