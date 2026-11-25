@@ -114,7 +114,7 @@ const masterPromptMarkdownRaw = `# Master Prompt: Integrasi Central SSO & Univer
 >    - **Post-Logout Redirect URI (` + "`SSO_POST_LOGOUT_REDIRECT_URI`" + `)**: ` + "`__LOGOUT_URI__`" + `
 > 2. Ikuti seluruh endpoint, parameter PKCE (S256), struktur payload JSON, dan Web Component di bawah ini **tanpa mengubah nama field atau path endpoint SSO**.
 > 3. Semua pengguna yang terdaftar di SSO **otomatis memiliki akses role ` + "`user`" + `** ke seluruh aplikasi aktif tanpa perlu approval manual. Role ` + "`admin`" + ` diatur terpusat di Admin Pusat SSO dan dikirim melalui array ` + "`applications`" + ` saat token exchange.
-> 4. Pasang **Universal App Switcher (` + "`<bp3kp-app-switcher>`" + `)** di navbar/header agar pengguna dapat berpindah antar-aplikasi BP3KP secara konsisten.
+> 4. Pasang **Universal App Switcher (` + "`<bp3kp-app-switcher>`" + `)** di navbar/header **HANYA ketika user sudah terautentikasi dan terautorisasi (` + "`approved`" + `)** agar pengguna dapat berpindah antar-aplikasi BP3KP yang berhak diaksesnya secara konsisten.
 
 ---
 
@@ -352,5 +352,5 @@ Pastikan seluruh poin berikut terpenuhi sebelum menyatakan integrasi selesai:
 - [ ] ` + "`Client ID`" + ` menggunakan ` + "`__CLIENT_ID__`" + ` dan ` + "`Redirect URI`" + ` menggunakan ` + "`__REDIRECT_URI__`" + `.
 - [ ] Klik tombol Login SSO di website target mengarahkan ke ` + "`__SSO_ORIGIN__/authorize`" + ` dengan parameter ` + "`code_challenge_method=S256`" + `.
 - [ ] Route callback memvalidasi ` + "`state`" + `, memanggil ` + "`POST __SSO_ORIGIN__/api/v1/auth/sso/exchange`" + `, menyimpan sesi user beserta role (` + "`user`" + ` atau ` + "`admin`" + ` untuk ` + "`__APP_CODE__`" + `), lalu mengarahkan ke halaman utama/dashboard.
-- [ ] Widget ` + "`<bp3kp-app-switcher current-app=\"__APP_CODE__\">`" + ` tampil di header/navbar dan menampilkan daftar aplikasi terbaru beserta logonya dari ` + "`__SSO_ORIGIN__/api/v1/public/apps`" + `.
+- [ ] Widget ` + "`<bp3kp-app-switcher current-app=\"__APP_CODE__\">`" + ` **hanya tampil setelah user terautentikasi & terautorisasi (` + "`approved`" + `)** di header/navbar dan menampilkan daftar aplikasi ` + "`approved`" + ` beserta logonya dari ` + "`__SSO_ORIGIN__/api/v1/auth/apps`" + `.
 `

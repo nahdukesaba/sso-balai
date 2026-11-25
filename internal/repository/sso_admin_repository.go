@@ -70,6 +70,69 @@ func (r *SSOAdminRepository) IsSSOAdmin(ctx context.Context, appUserID string) (
 	return isAdmin, nil
 }
 
+func (r *SSOAdminRepository) ListApprovedUserApplications(ctx context.Context, appUserID string) ([]SSOAdminApplication, error) {
+	if r == nil || r.pool == nil || strings.TrimSpace(appUserID) == "" {
+		return nil, nil
+	}
+	rows, err := r.pool.Query(
+		ctx,
+		`SELECT
+			a.id::text,
+			a.code,
+			a.name,
+			a.is_active,
+			COALESCE(a.client_id, ''),
+			COALESCE(NULLIF(a.access_policy, ''), 'AUTO_USER'),
+			COALESCE(a.redirect_uris, '{}'),
+			COALESCE(a.post_logout_redirect_uris, '{}'),
+			COALESCE(a.launch_url, ''),
+			COALESCE(a.description, ''),
+			COALESCE(a.logo_url, ''),
+			a.port,
+			a.backend_port
+		 FROM public.applications a
+		 JOIN public.app_users u
+			ON u.id = $1::uuid
+			AND u.deleted_at IS NULL
+		 LEFT JOIN public.app_memberships m
+			ON m.application_id = a.id
+			AND m.app_user_id = u.id
+			AND m.deleted_at IS NULL
+		 WHERE a.is_active = TRUE
+		   AND (COALESCE(u.is_sso_admin, false) = TRUE OR m.status = 'approved')
+		 ORDER BY a.created_at ASC, a.name ASC`,
+		strings.TrimSpace(appUserID),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var apps []SSOAdminApplication
+	for rows.Next() {
+		var item SSOAdminApplication
+		if err := rows.Scan(
+			&item.ID,
+			&item.Code,
+			&item.Name,
+			&item.IsActive,
+			&item.ClientID,
+			&item.AccessPolicy,
+			&item.RedirectURIs,
+			&item.PostLogoutRedirectURIs,
+			&item.LaunchURL,
+			&item.Description,
+			&item.LogoURL,
+			&item.Port,
+			&item.BackendPort,
+		); err != nil {
+			return nil, err
+		}
+		apps = append(apps, item)
+	}
+	return apps, rows.Err()
+}
+
 func (r *SSOAdminRepository) ListApplications(ctx context.Context) ([]SSOAdminApplication, error) {
 	rows, err := r.pool.Query(
 		ctx,

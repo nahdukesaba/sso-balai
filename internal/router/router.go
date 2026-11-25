@@ -33,6 +33,8 @@ func Register(
 		app.Post("/api/v1/auth/sso/exchange", browserSSOHandler.Exchange)
 		app.Post("/api/v1/auth/sso/introspect", browserSSOHandler.Introspect)
 		app.Get("/api/v1/auth/sso/session", browserSSOHandler.Session)
+		app.Get("/api/v1/auth/apps", browserSSOHandler.PublicApps)
+		app.Options("/api/v1/auth/apps", browserSSOHandler.PublicApps)
 		app.Get("/api/v1/public/apps", browserSSOHandler.PublicApps)
 		app.Options("/api/v1/public/apps", browserSSOHandler.PublicApps)
 		app.Get("/widget/default-logo.png", browserSSOHandler.DefaultLogoPNG)
